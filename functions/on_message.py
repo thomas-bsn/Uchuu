@@ -50,6 +50,8 @@ class MessageReaction(commands.Cog):
         print(random_function.__name__)
         if random_function == self.lgbt:
             await random_function(message)
+        elif random_function == self.dispense:
+            await random_function(message)
         else:
             await message.channel.send(f"<@{message.author.id}>")
             await random_function(message)
