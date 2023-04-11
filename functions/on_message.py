@@ -46,10 +46,22 @@ class MessageReaction(commands.Cog):
     async def random_function(self, message):
         functions_list = [self.lgbt, self.gif, self.insulte_walid, self.dispense]
         random_function = random.choice(functions_list)
-        # si la fonction est lgbt, on ne mentionne pas l'utilisateur
         if message.author.id in self.user_id_to_check.values():
             user_index = list(self.user_id_to_check.keys())[list(self.user_id_to_check.values()).index(message.author.id)]
             print(f"{user_index} : {random_function.__name__}")
+
+        if "thomas" in self.user_id_to_check and message.author.id == self.user_id_to_check['thomas']:
+            print("Je m'attaque PAS")
+        elif "yazid" in self.user_id_to_check and message.author.id == self.user_id_to_check['yazid']:
+            await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
+        elif "zoubir" in self.user_id_to_check and message.author.id == self.user_id_to_check['zoubir']:
+            await message.channel.send("Alexandre le grand est une grosse pute et GEN G est une equipe de merde, faut vraiment etre timbré mentalement pour idolatrer ces trucs")
+        elif "nabil" in self.user_id_to_check and message.author.id == self.user_id_to_check['nabil']:
+            await message.channel.send("Mon petit cochon d'ARAP, tu veux que je te fasse un petit cadeau ?")
+        elif "leila" in self.user_id_to_check and message.author.id == self.user_id_to_check['leila']:
+            await message.channel.send("ARRETE DE FLEURTER AVEC FEMBOYS SUBMISSIVES")
+            await self.gif(message)
+        
         if random_function == self.lgbt:
             await random_function(message)
         elif random_function == self.dispense:
@@ -57,6 +69,8 @@ class MessageReaction(commands.Cog):
         else:
             await message.channel.send(f"<@{message.author.id}>")
             await random_function(message)
+
+
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -70,31 +84,26 @@ class MessageReaction(commands.Cog):
             # on regarde si l'id est dans la liste
             if message.author.id in self.user_id_to_check.values():
                 # si c'est thomas on skip
-                try:
-                    if message.author.id == self.user_id_to_check['thomas']:
-                        print("Je m'attaque PAS")
-                        #pass
-                        await self.lgbt(message)
-                        # await self.random_function(message)
-                    elif message.author.id == self.user_id_to_check['yazid']:
-                        await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
-                        await self.random_function(message)
-                    elif message.author.id == self.user_id_to_check['zoubir']:
-                        await message.channel.send("Alexandre le grand est une grosse pute et GEN G est une equipe de merde, faut vraiment etre timbré mentalement pour idolatrer ces trucs")
-                        await self.random_function(message)
-                    elif message.author.id == self.user_id_to_check['nabil']:
-                        await message.channel.send("Mon petit cochon d'ARAP, tu veux que je te fasse un petit cadeau ?")
-                        await self.random_function(message)
-                    elif message.author.id == self.user_id_to_check['leila']:
-                        await message.channel.send("ARRETE DE FLEURTER AVEC FEMBOYS SUBMISSIVES")
-                        await self.gif(message)
-                        await self.random_function(message)
-                    else:
-                        await self.random_function(message)
-                    # Permettre aux commandes de fonctionner normalement
-                    await self.bot.process_commands(message)
-                except:
-                    pass
+                # if message.author.id == self.user_id_to_check['thomas']:
+                #     print("Je m'attaque PAS")
+                #     await self.random_function(message)
+                # elif message.author.id == self.user_id_to_check['yazid']:
+                #     await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
+                #     await self.random_function(message)
+                # elif message.author.id == self.user_id_to_check['zoubir']:
+                #     await message.channel.send("Alexandre le grand est une grosse pute et GEN G est une equipe de merde, faut vraiment etre timbré mentalement pour idolatrer ces trucs")
+                #     await self.random_function(message)
+                # elif message.author.id == self.user_id_to_check['nabil']:
+                #     await message.channel.send("Mon petit cochon d'ARAP, tu veux que je te fasse un petit cadeau ?")
+                #     await self.random_function(message)
+                # elif message.author.id == self.user_id_to_check['leila']:
+                #     await message.channel.send("ARRETE DE FLEURTER AVEC FEMBOYS SUBMISSIVES")
+                #     await self.gif(message)
+                #     await self.random_function(message)
+                # else:
+                await self.random_function(message)
+                # Permettre aux commandes de fonctionner normalement
+                await self.bot.process_commands(message)
                 
     @commands.command(name='turn', help='Activer ou désactiver le listener on_message.')
     async def turn(self, ctx, value: str = None):
