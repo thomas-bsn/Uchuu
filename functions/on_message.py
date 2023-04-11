@@ -70,7 +70,8 @@ class MessageReaction(commands.Cog):
              'kenza': 577182193248370737,
              'nabil': 287316198465470464,
              'yazid': 238702975713804288,
-             'yanis': 831117097668050968,}
+             'yanis': 831117097668050968,
+             'leila': 352191522369699841,}
 
             # on regarde si l'id est dans la liste
             if message.author.id in user_id_to_check.values():
@@ -87,6 +88,10 @@ class MessageReaction(commands.Cog):
                     await self.random_function(message)
                 elif message.author.id == user_id_to_check['nabil']:
                     await message.channel.send("Mon petit cochon d'ARAP, tu veux que je te fasse un petit cadeau ?")
+                    await self.random_function(message)
+                elif message.author.id == user_id_to_check['leila']:
+                    await message.channel.send("ARRETE DE FLEURTER AVEC FEMBOYS SUBMISSIVES")
+                    await self.gif(message)
                     await self.random_function(message)
                 else:
                     await self.random_function(message)
