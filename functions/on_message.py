@@ -10,7 +10,7 @@ class MessageReaction(commands.Cog):
         self.bot = bot
         self.target_file_path = 'include/target.txt'
         self.user_id_to_check = load_user_id_to_check(self.target_file_path)
-        self.command_enabled = True  # État actuel de la commande
+        self.command_enabled = False  # État actuel de la commande
         print_user_id_to_check(self.user_id_to_check)
 
     async def lgbt(self, message):
