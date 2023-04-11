@@ -17,12 +17,15 @@ class MessageReaction(commands.Cog):
         emojis = ["🏳️‍🌈", "🌈", "💜", "❤️‍🔥", "❤️‍🩹", "🌟", "🦄", "🐾", "🎉", "🎊", "🎈", "🎁", "🎶", "🍻", "🍷", "🍔", "🍟", "🍕", "🌺", "🌸", "🌼", "🌻", "🌹"]
         for emoji in emojis:
             await message.add_reaction(emoji)
-
-
-        
     
     async def dispense(self, message):
         pass
+
+    @commands.command(name='manyl', help='Envoie une photo au pif')
+    async def manyl(self, message):
+        folder = 'include/pictures'
+        gif_path = os.path.join(folder, random.choice(os.listdir(folder)))
+        await message.channel.send(file=discord.File(gif_path))
 
     async def gif(self, message):
         folder = 'include/pictures'
