@@ -64,4 +64,4 @@ class MessageReaction(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(MessageReaction(bot))
-    print("Extension MessageReaction chargée avec succès.")
+    print("Extension MessageReaction chargée avec succès.") 
