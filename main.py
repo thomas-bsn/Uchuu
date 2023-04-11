@@ -12,6 +12,7 @@ bot = commands.Bot(command_prefix='$', intents=intents)
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} est prêt.')
+    await bot.change_presence(activity=discord.Game("Je ferai l'inaceptable"))
     await bot.load_extension('functions.ping')  # Modifiez cette ligne pour charger l'extension ping
     await bot.load_extension('functions.on_message')  # Modifiez cette ligne pour charger l'extension on_message
     await bot.load_extension('functions.commands')  # Modifiez cette ligne pour charger l'extension commands
