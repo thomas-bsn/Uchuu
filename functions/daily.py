@@ -3,18 +3,18 @@ import asyncio
 import os
 from discord.ext import commands, tasks
 
-
 class Daily(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.channel_id = 1095149174430900335  # ID du channel où envoyer le message 801074831897526304
         self.blagues_folder = 'include/blagues'
         self.send_random_message.start()  # Démarrer la boucle asynchrone
+        self.temps = 600
 
     def cog_unload(self):
         self.send_random_message.cancel()  # Arrêter la boucle asynchrone
 
-    @tasks.loop(seconds=300)  # Envoyer le message toutes les 5 minutes
+    @tasks.loop(seconds=self.temps)
     async def send_random_message(self):
         print("Zoubir Harcelement")
         channel = self.bot.get_channel(self.channel_id)
@@ -37,7 +37,7 @@ class Daily(commands.Cog):
     async def on_ready(self):
         while not self.bot.is_closed():
             await self.send_random_message()
-            await asyncio.sleep(300)  # Attendre 10 secondes
+            await asyncio.sleep(self.temps)
 
 
 async def setup(bot):
