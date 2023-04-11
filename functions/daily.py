@@ -20,11 +20,14 @@ class Daily(commands.Cog):
         channel = self.bot.get_channel(self.channel_id)
         folders = [f for f in os.listdir(self.blagues_folder) if os.path.isdir(os.path.join(self.blagues_folder, f))]
         targeted_folder = os.path.join(self.blagues_folder, random.choice(folders))
+        while os.path.basename(targeted_folder) == "kenza": # On evite le dossier kenza
+            targeted_folder = os.path.join(self.blagues_folder, random.choice(folders))
         files = [f for f in os.listdir(targeted_folder) if os.path.isfile(os.path.join(targeted_folder, f)) and f.endswith('.txt')]
         targeted_file = os.path.join(targeted_folder, random.choice(files))
         with open(targeted_file, 'r', encoding='utf-8') as file:
             lines = file.readlines()
             await channel.send(random.choice(lines))
+
 
     @send_random_message.before_loop
     async def before_send_random_message(self):
