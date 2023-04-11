@@ -1,9 +1,11 @@
 import random
 import asyncio
 import os
+import discord
 from discord.ext import commands, tasks
 
 temps = 600
+
 class Daily(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -26,8 +28,10 @@ class Daily(commands.Cog):
         targeted_file = os.path.join(targeted_folder, random.choice(files))
         with open(targeted_file, 'r', encoding='utf-8') as file:
             lines = file.readlines()
-            await channel.send(random.choice(lines))
-
+            try:
+                await channel.send(random.choice(lines))
+            except discord.errors.Forbidden:
+                print("Zoubir Blague : J'ai pas les droits gros")
 
     @send_random_message.before_loop
     async def before_send_random_message(self):
@@ -38,7 +42,6 @@ class Daily(commands.Cog):
         while not self.bot.is_closed():
             await self.send_random_message()
             await asyncio.sleep(temps)
-
 
 async def setup(bot):
     await bot.add_cog(Daily(bot))
