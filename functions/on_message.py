@@ -47,6 +47,7 @@ class MessageReaction(commands.Cog):
         functions_list = [self.lgbt, self.gif, self.insulte_walid, self.dispense]
         random_function = random.choice(functions_list)
         # si la fonction est lgbt, on ne mentionne pas l'utilisateur
+        print(random_function.__name__)
         if random_function == self.lgbt:
             await random_function(message)
         else:
@@ -73,8 +74,9 @@ class MessageReaction(commands.Cog):
             if message.author.id in user_id_to_check.values():
                 # si c'est thomas on skip
                 if message.author.id == user_id_to_check['thomas']:
-                    pass
+                    # pass
                     # await self.gif(message)
+                    await self.random_function(message)
                 elif message.author.id == user_id_to_check['yazid']:
                     await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
                     await self.random_function(message)

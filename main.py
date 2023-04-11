@@ -16,5 +16,6 @@ async def on_ready():
     await bot.load_extension('functions.on_message')  # Modifiez cette ligne pour charger l'extension on_message
     await bot.load_extension('functions.commands')  # Modifiez cette ligne pour charger l'extension commands
     await bot.load_extension('functions.daily')  # Modifiez cette ligne pour charger l'extension daily
+    await bot.load_extension('functions.kenza')  # Modifiez cette ligne pour charger l'extension kenza
 
 bot.run(TOKEN)
