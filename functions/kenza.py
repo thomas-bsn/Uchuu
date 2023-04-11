@@ -3,7 +3,7 @@ import asyncio
 import os
 from discord.ext import commands, tasks
 
-
+temps = 300
 class Kenza(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -14,7 +14,7 @@ class Kenza(commands.Cog):
     def cog_unload(self):
         self.send_random_message.cancel()  # Arrêter la boucle asynchrone
 
-    @tasks.loop(seconds=300)  # Envoyer le message toutes les 10 secondes
+    @tasks.loop(seconds=temps)  # Envoyer le message toutes les 10 secondes
     async def send_random_message(self):
         print("Kenza Harcelement")
         channel = self.bot.get_channel(self.channel_id)
@@ -32,7 +32,7 @@ class Kenza(commands.Cog):
     async def on_ready(self):
         while not self.bot.is_closed():
             await self.send_random_message()
-            await asyncio.sleep(300)  # Attendre 10 secondes
+            await asyncio.sleep(temps)  # Attendre 10 secondes
 
 
 async def setup(bot):
