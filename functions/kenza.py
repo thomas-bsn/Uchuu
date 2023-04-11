@@ -14,7 +14,7 @@ class Kenza(commands.Cog):
     def cog_unload(self):
         self.send_random_message.cancel()  # Arrêter la boucle asynchrone
 
-    @tasks.loop(seconds=10)  # Envoyer le message toutes les 10 secondes
+    @tasks.loop(seconds=300)  # Envoyer le message toutes les 10 secondes
     async def send_random_message(self):
         channel = self.bot.get_channel(self.channel_id)
         targeted = os.path.join(self.blagues_folder, "amoureux_fares.txt")
@@ -31,7 +31,7 @@ class Kenza(commands.Cog):
     async def on_ready(self):
         while not self.bot.is_closed():
             await self.send_random_message()
-            await asyncio.sleep(10)  # Attendre 10 secondes
+            await asyncio.sleep(300)  # Attendre 10 secondes
 
 
 async def setup(bot):
