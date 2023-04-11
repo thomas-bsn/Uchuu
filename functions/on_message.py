@@ -1,5 +1,7 @@
 import os
 import random
+import discord
+import moviepy.editor as mp
 from discord.ext import commands
 
 class MessageReaction(commands.Cog):
@@ -13,7 +15,23 @@ class MessageReaction(commands.Cog):
         pass
 
     async def gif(self, message):
-        await message.channel.send('https://media.discordapp.net/attachments/1011640076725395487/1079110434436681901/crack-1.gif?width=457&height=517')
+        folder = 'include/pictures'
+        gif_path = os.path.join(folder, random.choice(os.listdir(folder)))
+        await message.channel.send("PLEURE") 
+        await message.channel.send(file=discord.File(gif_path))
+
+    # async def gif(self, message):
+    #     folder = 'include/pictures'
+    #     gif_path = os.path.join(folder, random.choice(os.listdir(folder)))
+    #     clip = mp.VideoFileClip(gif_path)
+    #     clip_resized = clip.resize(height=480)
+    #     resized_path = os.path.splitext(gif_path)[0] + "_resized.mp4"
+    #     clip_resized.write_videofile(resized_path)
+    #     await message.channel.send("PLEURE") 
+    #     await message.channel.send(file=discord.File(resized_path))
+    #     clip.close()
+    #     clip_resized.close()
+    #     os.remove(resized_path)
 
     async def insulte_walid(self, message):
         folder = 'include/insultes'
@@ -56,7 +74,10 @@ class MessageReaction(commands.Cog):
                 # si c'est thomas on skip
                 if message.author.id == user_id_to_check['thomas']:
                     pass
-                    # await self.insulte_walid(message)
+                    # await self.gif(message)
+                elif message.author.id == user_id_to_check['yazid']:
+                    await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
+                    await self.random_function(message)
                 else:
                     await self.random_function(message)
             # Permettre aux commandes de fonctionner normalement

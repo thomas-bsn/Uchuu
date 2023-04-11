@@ -7,14 +7,14 @@ from discord.ext import commands, tasks
 class Daily(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.channel_id = 1051204919249612903  # ID du channel où envoyer le message
+        self.channel_id = 1095149174430900335  # ID du channel où envoyer le message 801074831897526304
         self.blagues_folder = 'include/blagues'
         self.send_random_message.start()  # Démarrer la boucle asynchrone
 
     def cog_unload(self):
         self.send_random_message.cancel()  # Arrêter la boucle asynchrone
 
-    @tasks.loop(seconds=300)  # Envoyer le message toutes les 10 secondes
+    @tasks.loop(seconds=300)  # Envoyer le message toutes les 5 minutes
     async def send_random_message(self):
         channel = self.bot.get_channel(self.channel_id)
         folders = [f for f in os.listdir(self.blagues_folder) if os.path.isdir(os.path.join(self.blagues_folder, f))]
