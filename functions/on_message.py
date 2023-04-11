@@ -78,6 +78,12 @@ class MessageReaction(commands.Cog):
                 elif message.author.id == user_id_to_check['yazid']:
                     await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
                     await self.random_function(message)
+                elif message.author.id == user_id_to_check['nabil']:
+                    await message.channel.send("Alexandre le grand est une grosse pute et GLG est une equipe de merde, faut vraiment etre timbré mentalement pour idolatrer ces trucs")
+                    await self.random_function(message)
+                elif message.author.id == user_id_to_check['nabil']:
+                    await message.channel.send("Mon petit cochon d'ARAP, tu veux que je te fasse un petit cadeau ?")
+                    await self.random_function(message)
                 else:
                     await self.random_function(message)
             # Permettre aux commandes de fonctionner normalement
