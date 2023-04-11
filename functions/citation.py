@@ -8,7 +8,8 @@ class Citation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.source_channel_id = 979525063655178270  # ID du channel source
-        self.target_channel_id = 975160412804878356  # ID du channel cible
+        self.target_channel_id = 1051204919249612903  # ID du channel cible
+        self.command_enabled = False  # État actuel de la commande
         self.send_random_message.start()  # Démarrer la boucle asynchrone
 
     def cog_unload(self):
@@ -16,6 +17,8 @@ class Citation(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def send_random_message(self):
+        if self.command_enabled is False:
+            return
         print("Citation S.A.M.")
         source_channel = self.bot.get_channel(self.source_channel_id)
         target_channel = self.bot.get_channel(self.target_channel_id)
