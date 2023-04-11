@@ -4,7 +4,7 @@ from discord.ext import commands
 class Echo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.dest_channel = bot.get_channel(801074831897526304)  # ID du channel de destination
+        self.dest_channel = bot.get_channel(1051204919249612903)  # ID du channel de destination
 
     @commands.command(name='echo', help='Répète le message sur le channel de destination')
     async def echo(self, ctx, *args):
