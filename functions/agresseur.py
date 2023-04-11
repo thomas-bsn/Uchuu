@@ -7,7 +7,11 @@ class Agresseur(commands.Cog):
         self.bot = bot
 
     @commands.command(name='agresseur', help='Insulte un utilisateur au hasard')
-    async def agresseur(self, ctx, user: discord.Member):
+    async def agresseur(self, ctx, user: discord.Member = None):
+        if user is None:
+            # Si l'utilisateur n'a pas mentionné de personne, envoyer un message d'aide
+            await ctx.send(f"Usage: `{ctx.prefix}agresseur @utilisateur`")
+            return
         # Ouvre le fichier insulte.txt
         with open('include/insultes/insulte.txt', 'r') as file:
             # Lit les lignes du fichier et les stocke dans une liste
