@@ -1,12 +1,14 @@
 import random
 import asyncio
+import discord  # Ajouter cette ligne
 from discord.ext import commands, tasks
+
 
 class Citation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.source_channel_id = 979525063655178270  # ID du channel source
-        self.target_channel_id = 801074831897526304  # ID du channel cible
+        self.target_channel_id = 975160412804878356  # ID du channel cible
         self.send_random_message.start()  # Démarrer la boucle asynchrone
 
     def cog_unload(self):
@@ -22,7 +24,13 @@ class Citation(commands.Cog):
             messages.append(message)
         if messages:
             random_message = random.choice(messages)
-            await target_channel.send(f"De **{random_message.author.display_name}** : *{random_message.content}*")
+            try:
+                await target_channel.send(f"De **{random_message.author.display_name}** : *{random_message.content}*")
+            except discord.errors.Forbidden:
+                print("Citation S.A.M. : pas les droits gros")
+        else:
+            print("Citation S.A.M. : pas de messages disponibles")
+
 
     @send_random_message.before_loop
     async def before_send_random_message(self):
