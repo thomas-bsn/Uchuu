@@ -9,8 +9,8 @@ class Help(commands.Cog):
         if not args:
             # Si aucun argument n'est donné, afficher la liste des commandes disponibles
             response = "Liste des commandes disponibles :\n\n"
-            for command in self.bot.commands:
-                response += f"{command.name} : {command.help}\n"
+            commands_list = [f"{command.name:<20}{command.help:<20}{command.signature:<20}" for command in self.bot.commands]
+            response += "\n".join(commands_list)
             await ctx.send(response)
         else:
             # Sinon, afficher l'aide pour la commande donnée
@@ -22,6 +22,7 @@ class Help(commands.Cog):
                 await ctx.send(response)
             else:
                 await ctx.send(f"La commande `{command}` n'existe pas.")
+
 
 async def setup(bot):
     await bot.add_cog(Help(bot))

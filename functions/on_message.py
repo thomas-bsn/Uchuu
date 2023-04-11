@@ -10,6 +10,7 @@ class MessageReaction(commands.Cog):
         self.bot = bot
         self.target_file_path = 'include/target.txt'
         self.user_id_to_check = load_user_id_to_check(self.target_file_path)
+        self.command_enabled = True  # État actuel de la commande
         print_user_id_to_check(self.user_id_to_check)
 
     async def lgbt(self, message):
@@ -57,6 +58,10 @@ class MessageReaction(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         self.user_id_to_check = load_user_id_to_check(self.target_file_path)
+
+        if self.command_enabled is False:
+            return
+
         # Vérifier que le message n'est pas une commande
         if not message.content.startswith(self.bot.command_prefix):
             # on regarde si l'id est dans la liste
@@ -87,6 +92,25 @@ class MessageReaction(commands.Cog):
                     await self.bot.process_commands(message)
                 except:
                     pass
+                
+    @commands.command(name='turn', help='Activer ou désactiver le listener on_message.')
+    async def turn(self, ctx, value: str = None):
+        if value is None:
+            await ctx.send('La commande nécessite un argument "on" ou "off".')
+            return
+
+        if value == 'on':
+            self.command_enabled = True
+            await ctx.send('Le listener on_message a été activé.')
+        elif value == 'off':
+            self.command_enabled = False
+            await ctx.send('Le listener on_message a été désactivé.')
+        else:
+            await ctx.send('La valeur doit être "on" ou "off".')
+
+
+
+
 
 
 async def setup(bot):
