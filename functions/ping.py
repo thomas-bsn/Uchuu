@@ -4,7 +4,7 @@ class Ping(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command()
+    @commands.command(name='ping', help='Affiche une réponse du bot pour checker si il est en ligne')
     async def ping(self, ctx):
         await ctx.send('Ta gueule le zink')
 
