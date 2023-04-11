@@ -1,34 +1,29 @@
-import os
 import random
 import asyncio
+import os
 from discord.ext import commands, tasks
 
 
 class Daily(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.channel_id = 801074831897526304  # ID du channel où envoyer le message
-
+        self.channel_id = 1051204919249612903  # ID du channel où envoyer le message
+        self.blagues_folder = 'include/blagues'
         self.send_random_message.start()  # Démarrer la boucle asynchrone
 
     def cog_unload(self):
         self.send_random_message.cancel()  # Arrêter la boucle asynchrone
 
-    @tasks.loop(seconds=10)  # Envoyer le message toutes les 10 secondes
+    @tasks.loop(seconds=300)  # Envoyer le message toutes les 10 secondes
     async def send_random_message(self):
         channel = self.bot.get_channel(self.channel_id)
-        blagues_folder = 'blagues'
-        target = ["zoubir"]
-        folder_path = os.path.join(blagues_folder, random.choice(target))
-        await channel.send("folder_path")
-        print("teesdtet")
-        files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.endswith('.txt')]
-        await channel.send("foldedsfgdfgr_path")
-        file_path = os.path.join(folder_path, random.choice(files))
-        with open(file_path, 'r', encoding='utf-8') as file:
+        folders = [f for f in os.listdir(self.blagues_folder) if os.path.isdir(os.path.join(self.blagues_folder, f))]
+        targeted_folder = os.path.join(self.blagues_folder, random.choice(folders))
+        files = [f for f in os.listdir(targeted_folder) if os.path.isfile(os.path.join(targeted_folder, f)) and f.endswith('.txt')]
+        targeted_file = os.path.join(targeted_folder, random.choice(files))
+        with open(targeted_file, 'r', encoding='utf-8') as file:
             lines = file.readlines()
             await channel.send(random.choice(lines))
-
 
     @send_random_message.before_loop
     async def before_send_random_message(self):
@@ -38,7 +33,7 @@ class Daily(commands.Cog):
     async def on_ready(self):
         while not self.bot.is_closed():
             await self.send_random_message()
-            await asyncio.sleep(10)  # Attendre 10 secondes
+            await asyncio.sleep(300)  # Attendre 10 secondes
 
 
 async def setup(bot):

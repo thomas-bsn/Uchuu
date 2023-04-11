@@ -45,13 +45,18 @@ class MessageReaction(commands.Cog):
              'sam': 342659019309056001, 
              'thomas': 188407821300137984,
              'inha': 992063376396132383,
-             'zepey': 1075218280291242057}
+             'zepey': 1075218280291242057,
+             'kenza': 577182193248370737,
+             'nabil': 287316198465470464,
+             'yazid': 238702975713804288,
+             'yanis': 831117097668050968,}
 
             # on regarde si l'id est dans la liste
             if message.author.id in user_id_to_check.values():
                 # si c'est thomas on skip
                 if message.author.id == user_id_to_check['thomas']:
                     pass
+                    # await self.insulte_walid(message)
                 else:
                     await self.random_function(message)
             # Permettre aux commandes de fonctionner normalement
