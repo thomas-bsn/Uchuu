@@ -47,7 +47,7 @@ class MessageReaction(commands.Cog):
         functions_list = [self.lgbt, self.gif, self.insulte_walid, self.dispense]
         random_function = random.choice(functions_list)
         # si la fonction est lgbt, on ne mentionne pas l'utilisateur
-        print(random_function.__name__)
+        print(f"<@{message.author.id}> : ", random_function.__name__)
         if random_function == self.lgbt:
             await random_function(message)
         elif random_function == self.dispense:
