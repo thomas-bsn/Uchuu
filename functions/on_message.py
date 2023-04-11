@@ -58,9 +58,9 @@ class MessageReaction(commands.Cog):
             if message.author.id in self.user_id_to_check.values():
                 # si c'est thomas on skip
                 if message.author.id == self.user_id_to_check['thomas']:
-                    # print("Je m'attaque PAS")
-                    # pass
-                    await self.gif(message)
+                    print("Je m'attaque PAS")
+                    pass
+                    # await self.gif(message)
                     # await self.random_function(message)
                 elif message.author.id == self.user_id_to_check['yazid']:
                     await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
