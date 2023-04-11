@@ -5,17 +5,24 @@ import moviepy.editor as mp
 from discord.ext import commands
 
 
-user_id_to_check = \
-{'zoubir': 290513038929428481, 
-'sam': 342659019309056001, 
-'thomas': 188407821300137984,
-'inha': 992063376396132383,
-'zepey': 1075218280291242057,
-'kenza': 577182193248370737,
-'nabil': 287316198465470464,
-'yazid': 238702975713804288,
-'yanis': 831117097668050968,
-'leila': 352191522369699841,}
+file_path = 'include/target.txt'
+user_id_to_check = {}
+with open(file_path, 'r', encoding='utf-8') as file:
+    for line in file:
+        name, user_id = line.strip().split(':')
+        user_id_to_check[name] = int(user_id)
+
+# user_id_to_check = \
+# {'zoubir': 290513038929428481, 
+# 'sam': 342659019309056001, 
+# 'thomas': 188407821300137984,
+# 'inha': 992063376396132383,
+# 'zepey': 1075218280291242057,
+# 'kenza': 577182193248370737,
+# 'nabil': 287316198465470464,
+# 'yazid': 238702975713804288,
+# 'yanis': 831117097668050968,
+# 'leila': 352191522369699841,}
 
 class MessageReaction(commands.Cog):
     def __init__(self, bot):
@@ -81,6 +88,7 @@ class MessageReaction(commands.Cog):
             if message.author.id in user_id_to_check.values():
                 # si c'est thomas on skip
                 if message.author.id == user_id_to_check['thomas']:
+                    print("Je m'attaque PAS")
                     pass
                     # await self.gif(message)
                     # await self.random_function(message)
