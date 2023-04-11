@@ -16,7 +16,7 @@ class Daily(commands.Cog):
 
     @tasks.loop(seconds=temps)
     async def send_random_message(self):
-        print("Zoubir Harcelement")
+        print("Zoubir Blague")
         channel = self.bot.get_channel(self.channel_id)
         folders = [f for f in os.listdir(self.blagues_folder) if os.path.isdir(os.path.join(self.blagues_folder, f))]
         targeted_folder = os.path.join(self.blagues_folder, random.choice(folders))
