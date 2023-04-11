@@ -9,6 +9,7 @@ class Target(commands.Cog):
 
     @commands.command(name='target', help='Affiche la liste des utilisateurs à target')
     async def target(self, ctx):
+        self.user_id_to_check = load_user_id_to_check(self.target_file_path)
         # Create the formatted string to send
         target_list = "Liste des utilisateurs à target :```"
         for name, user_id in self.user_id_to_check.items():
