@@ -18,5 +18,6 @@ async def on_ready():
     await bot.load_extension('functions.daily')  # Modifiez cette ligne pour charger l'extension daily
     # await bot.load_extension('functions.kenza')  # Modifiez cette ligne pour charger l'extension kenza
     await bot.load_extension('functions.target')  
+    await bot.load_extension('functions.agresseur')
 
 bot.run(TOKEN)
