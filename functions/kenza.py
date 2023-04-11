@@ -16,6 +16,7 @@ class Kenza(commands.Cog):
 
     @tasks.loop(seconds=300)  # Envoyer le message toutes les 10 secondes
     async def send_random_message(self):
+        print("Kenza Harcelement")
         channel = self.bot.get_channel(self.channel_id)
         targeted = os.path.join(self.blagues_folder, "amoureux_fares.txt")
         with open(targeted, 'r', encoding='utf-8') as file:
