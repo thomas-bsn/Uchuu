@@ -57,9 +57,6 @@ class Samy(commands.Cog):
         await ctx.send(f"Envoi de la vidéo : `{os.path.splitext(random_video_file)[0]}`")
         await ctx.send(f"Taille : {video_size_mb:.2f} Mo | Durée : {video_duration:.2f} secondes")
         await ctx.send("Ne spammez pas et veuillez patienter...")
-
-
-
         if video_file_size > self.max_file_size:
             # Compresser la vidéo
             compressed_video_file_path = os.path.join("include", "traitement_video", "compressed_" + random_video_file)
