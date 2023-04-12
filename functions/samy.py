@@ -4,12 +4,16 @@ import random
 from discord.ext import commands
 from moviepy.editor import *
 
-path = "/mnt/d/Vidéos/SCP  Secret Laboratory"
+path = "/mnt/d/Vidéos/"
+dossier = ["SCP  Secret Laboratory","Among Us","Call of Duty  Black Ops 3",
+           "Game.exe","EA Desktop","Elden Ring","Detroit  Become Human",
+           "Counter-strike  Global Offensive","Call of Duty  Modern Warfare 2 (2022)",
+           "Call of Duty  Modern Warfare 2019","Garry's Mod","Fortnite","Roblox VR","Phasmophobia","VRChat","Portal 2"]
 
 class Samy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.video_folder_path = path
+        self.video_folder_path = path + random.choice(dossier)
         self.max_file_size = 8 * 1024 * 1024  # 8 Mo
         self.game_name = os.path.basename(self.video_folder_path)
 
@@ -23,9 +27,9 @@ class Samy(commands.Cog):
         name_length = len(os.path.splitext(video_file_name)[0])
         frame_length = name_length + 24
         frame_top = "+" + "=" * frame_length + "+"
-        name_line = f"| Vidéo sélectionnée : {os.path.splitext(video_file_name)[0]}"
-        size_line = f"| Taille : {video_file_size / 1024 / 1024:.2f} Mo"
-        duration_line = f"| Durée : {video_duration:.2f} secondes"
+        name_line = f"- Vidéo sélectionnée : {os.path.splitext(video_file_name)[0]}"
+        size_line = f"- Taille : {video_file_size / 1024 / 1024:.2f} Mo"
+        duration_line = f"- Durée : {video_duration:.2f} secondes"
         print(f"{frame_top}\n{name_line}\n\n{size_line}\n\n{duration_line}\n{frame_top}")
 
 
@@ -34,6 +38,7 @@ class Samy(commands.Cog):
 
     @commands.command(name='samy', help=f'Envoie une vidéo aléatoire de {os.path.basename(path)}')
     async def samy(self, ctx):
+        self.video_folder_path = path + random.choice(dossier)
         # Liste les fichiers du dossier de vidéos
         video_files = os.listdir(self.video_folder_path)
         # Filtrer les fichiers qui ne sont pas des vidéos
