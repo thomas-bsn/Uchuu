@@ -3,17 +3,19 @@ import os
 import random
 from discord.ext import commands
 from moviepy.editor import *
+from typing import Optional
 
 path = "/mnt/d/Vidéos/"
-dossier = ["SCP  Secret Laboratory","Among Us","Call of Duty  Black Ops 3",
+liste_dossiers = ["SCP  Secret Laboratory","Among Us","Call of Duty  Black Ops 3",
            "Game.exe","EA Desktop","Elden Ring","Detroit  Become Human",
            "Counter-strike  Global Offensive","Call of Duty  Modern Warfare 2 (2022)",
-           "Call of Duty  Modern Warfare 2019","Garry's Mod","Fortnite","Roblox VR","Phasmophobia","VRChat","Portal 2"]
+           "Call of Duty  Modern Warfare 2019","Garry's Mod","Fortnite","Roblox VR",
+           "Phasmophobia","VRChat","Portal 2","Star Wars Jedi  Fallen Order"]
 
 class Samy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.video_folder_path = path + random.choice(dossier)
+        self.video_folder_path = path + random.choice(liste_dossiers)
         self.max_file_size = 8 * 1024 * 1024  # 8 Mo
         self.game_name = os.path.basename(self.video_folder_path)
 
@@ -34,13 +36,30 @@ class Samy(commands.Cog):
 
 
 
+    @commands.command(name='videoslist', help=f'Liste les vidéos du dossier')
+    async def videoslist(self, ctx):
+        message = "Voici la liste des dossiers (à copier à l'espace près avec les guillemets):\n"
+        for item in liste_dossiers:
+            print("\"" + item + "\"")
+            message += "\"" + item + "\"" + "\n"
+        await ctx.send("```" + message + "```")
 
 
-    @commands.command(name='samy', help=f'Envoie une vidéo aléatoire de {os.path.basename(path)}')
-    async def samy(self, ctx):
-        self.video_folder_path = path + random.choice(dossier)
+    @commands.command(name='samy', help=f'Envoie une vidéo aléatoire de la liste des jeux (Fais $videoslist)')
+    async def samy(self, ctx, dossier_selectionne: Optional[str] = ''):
+        if dossier_selectionne != '' and dossier_selectionne not in liste_dossiers:
+            await ctx.send(f"Le dossier '{dossier_selectionne}' n'existe pas.")
+            await ctx.send(f"Usage : `$samy \"[nom_dossier]\" (utilisez la commande `$videoslist` pour obtenir la liste des dossiers)")
+            return
+        if dossier_selectionne == '':
+            # Choix d'un dossier au hasard si aucun dossier n'est spécifié
+            video_folder_path = path + random.choice(liste_dossiers)
+        else:
+            # Utilisation du dossier spécifié
+            video_folder_path = path + dossier_selectionne
+
         # Liste les fichiers du dossier de vidéos
-        video_files = os.listdir(self.video_folder_path)
+        video_files = os.listdir(video_folder_path)
         # Filtrer les fichiers qui ne sont pas des vidéos
         video_files = [f for f in video_files if f.endswith(('.mp4', '.avi', '.mkv'))]
         # Vérifie si il y a des vidéos dans le dossier
@@ -50,7 +69,7 @@ class Samy(commands.Cog):
         # Sélectionne un fichier vidéo aléatoire
         random_video_file = random.choice(video_files)
         # Vérifie la taille du fichier vidéo
-        video_file_path = os.path.join(self.video_folder_path, random_video_file)
+        video_file_path = os.path.join(video_folder_path, random_video_file)
         video_file_size = os.path.getsize(video_file_path)
         video_size_mb = round(video_file_size / (1024 * 1024), 2)
         # Vérifie la durée de la vidéo
@@ -73,6 +92,10 @@ class Samy(commands.Cog):
         else:
             # Envoie le fichier vidéo
             await ctx.send(file=discord.File(video_file_path))
+
+
+
+
 
 async def setup(bot):
     await bot.add_cog(Samy(bot))
