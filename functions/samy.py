@@ -10,7 +10,7 @@ liste_dossiers = ["SCP  Secret Laboratory","Among Us","Call of Duty  Black Ops 3
            "Game.exe","EA Desktop","Elden Ring","Detroit  Become Human",
            "Counter-strike  Global Offensive","Call of Duty  Modern Warfare 2 (2022)",
            "Call of Duty  Modern Warfare 2019","Garry's Mod","Fortnite","Roblox VR",
-           "Phasmophobia","VRChat","Portal 2","Star Wars Jedi  Fallen Order"]
+           "Phasmophobia","VRChat","Portal 2","Star Wars Jedi  Fallen Order","Desktop","League of Legends"]
 
 class Samy(commands.Cog):
     def __init__(self, bot):
@@ -49,7 +49,7 @@ class Samy(commands.Cog):
     async def samy(self, ctx, dossier_selectionne: Optional[str] = ''):
         if dossier_selectionne != '' and dossier_selectionne not in liste_dossiers:
             await ctx.send(f"Le dossier '{dossier_selectionne}' n'existe pas.")
-            await ctx.send(f"Usage : `$samy \"[nom_dossier]\" (utilisez la commande `$videoslist` pour obtenir la liste des dossiers)")
+            await ctx.send(f"Usage : `$samy \"[nom_dossier]\" (utilisez la commande $videoslist pour obtenir la liste des dossiers)`")
             return
         if dossier_selectionne == '':
             # Choix d'un dossier au hasard si aucun dossier n'est spécifié
