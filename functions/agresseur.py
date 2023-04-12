@@ -6,7 +6,7 @@ class Agresseur(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name='agresseur', help='Insulte un utilisateur au hasard')
+    @commands.command(name='nabil', help='Insulte un utilisateur au hasard')
     async def agresseur(self, ctx, user: discord.Member = None):
         if user is None:
             # Si l'utilisateur n'a pas mentionné de personne, envoyer un message d'aide
