@@ -22,5 +22,6 @@ async def on_ready():
     await bot.load_extension('functions.echo')
     await bot.load_extension('functions.clean')
     await bot.load_extension('functions.citation')
+    await bot.load_extension('functions.samy')
 
 bot.run(TOKEN)

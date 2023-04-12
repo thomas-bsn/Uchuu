@@ -83,24 +83,6 @@ class MessageReaction(commands.Cog):
         if not message.content.startswith(self.bot.command_prefix):
             # on regarde si l'id est dans la liste
             if message.author.id in self.user_id_to_check.values():
-                # si c'est thomas on skip
-                # if message.author.id == self.user_id_to_check['thomas']:
-                #     print("Je m'attaque PAS")
-                #     await self.random_function(message)
-                # elif message.author.id == self.user_id_to_check['yazid']:
-                #     await message.channel.send(f"Arrete de flirter avec FEMME <@{message.author.id}>") 
-                #     await self.random_function(message)
-                # elif message.author.id == self.user_id_to_check['zoubir']:
-                #     await message.channel.send("Alexandre le grand est une grosse pute et GEN G est une equipe de merde, faut vraiment etre timbré mentalement pour idolatrer ces trucs")
-                #     await self.random_function(message)
-                # elif message.author.id == self.user_id_to_check['nabil']:
-                #     await message.channel.send("Mon petit cochon d'ARAP, tu veux que je te fasse un petit cadeau ?")
-                #     await self.random_function(message)
-                # elif message.author.id == self.user_id_to_check['leila']:
-                #     await message.channel.send("ARRETE DE FLEURTER AVEC FEMBOYS SUBMISSIVES")
-                #     await self.gif(message)
-                #     await self.random_function(message)
-                # else:
                 await self.random_function(message)
                 # Permettre aux commandes de fonctionner normalement
                 await self.bot.process_commands(message)
@@ -108,7 +90,7 @@ class MessageReaction(commands.Cog):
     @commands.command(name='turn', help='Activer ou désactiver le listener on_message.')
     async def turn(self, ctx, value: str = None):
         if value is None:
-            await ctx.send('La commande nécessite un argument "on" ou "off".')
+            await ctx.send(f'La valeur est sur {self.command_enabled}, Usage: {self.bot.command_prefix}turn (on/off)')
             return
 
         if value == 'on':
@@ -118,7 +100,7 @@ class MessageReaction(commands.Cog):
             self.command_enabled = False
             await ctx.send('Le listener on_message a été désactivé.')
         else:
-            await ctx.send('La valeur doit être "on" ou "off".')
+            await ctx.send('La commande nécessite un argument "on" ou "off".')
 
 
 

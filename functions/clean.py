@@ -6,7 +6,7 @@ class Clean(commands.Cog):
         self.bot = bot
 
     @commands.command(name='clean', help='Supprime un certain nombre de messages ou les messages d\'un utilisateur')
-    async def clean(self, ctx, number: int, user: discord.Member = None):
+    async def clean(self, ctx, number: int, user: discord.Member = None): 
         if number < 0 or number > 100:
             await ctx.send("Le nombre de messages à supprimer doit être compris entre 0 et 100.")
             return
@@ -18,7 +18,7 @@ class Clean(commands.Cog):
             def is_user_message(message):
                 return message.author == user
             deleted = await ctx.channel.purge(limit=number+1, check=is_user_message)
-            await ctx.send(f"{len(deleted)-1} messages de {user.mention} ont été supprimés.")
+            await ctx.send(f"{len(deleted)-1} messages de {user.mention} ont été supprimés.")#TODO: FIX LES NB DE SUPPRESSION POUR MENTION
         else:
             deleted = await ctx.channel.purge(limit=number+1)
             await ctx.send(f"{len(deleted)-1} messages ont été supprimés.")
