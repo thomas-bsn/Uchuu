@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 
 DELETE_LIMIT = 100
-DELETE_ERROR_MESSAGE = "Le nombre de messages à supprimer doit être compris entre 0 et 100."
+DELETE_ERROR_MESSAGE = f"Le nombre de messages à supprimer doit être compris entre 0 et {DELETE_LIMIT}."
 PERMISSION_ERROR_MESSAGE = "Vous n'avez pas les permissions nécessaires pour effectuer cette action."
 USER_NOT_FOUND_ERROR_MESSAGE = "Mentionne un utilisateur valide."
 MISSING_ARGUMENT_ERROR_MESSAGE = "Il manque un argument : nombre de messages à supprimer."
