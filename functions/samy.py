@@ -5,14 +5,24 @@ from discord.ext import commands
 from moviepy.editor import *
 from typing import Optional
 
-path = "/mnt/d/Vidéos/"
-liste_dossiers = ["SCP  Secret Laboratory","Among Us","Call of Duty  Black Ops 3",
-           "Game.exe","EA Desktop","Elden Ring","Detroit  Become Human",
-           "Counter-strike  Global Offensive","Call of Duty  Modern Warfare 2 (2022)",
-           "Call of Duty  Modern Warfare 2019","Garry's Mod","Fortnite","Roblox VR",
-           "Phasmophobia","VRChat","Portal 2","Star Wars Jedi  Fallen Order","Desktop",
-           "League of Legends","Sea of Thieves","Valorant","Base Profile","Tiger","Stray",
-           "Overwatch 2","NieR Automata","Muck","Fall Guys","4dcd188552ce8876d5e55e1f6d22505109bfa4cb","1.7"]
+#path = "/mnt/d/Vidéos/"
+path = "/mnt/e/Vidéos/"
+
+# liste_dossiers = ["SCP  Secret Laboratory","Among Us","Call of Duty  Black Ops 3",
+#            "Game.exe","EA Desktop","Elden Ring","Detroit  Become Human",
+#            "Counter-strike  Global Offensive","Call of Duty  Modern Warfare 2 (2022)",
+#            "Call of Duty  Modern Warfare 2019","Garry's Mod","Fortnite","Roblox VR",
+#            "Phasmophobia","VRChat","Portal 2","Star Wars Jedi  Fallen Order","Desktop",
+#            "League of Legends","Sea of Thieves","Valorant","Base Profile","Tiger","Stray",
+#            "Overwatch 2","NieR Automata","Muck","Fall Guys","4dcd188552ce8876d5e55e1f6d22505109bfa4cb","1.7"]
+
+
+liste_dossiers = ["Among Us", "Desktop", "League of Legends", "Plutonium",
+    "BlueStacks", "Elden Ring", "Lethal Company", "Roblox VR",
+    "Content Warning", "Fortnite", "Lethal Company mods", "SCP Secret Laboratory",
+    "Counter-strike 2", "Garry's Mod", "Lies of P", "Tekken 8",
+    "Dark Souls III", "Hollow Knight", "Valorant"]
+
 
 class Samy(commands.Cog):
     def __init__(self, bot):
