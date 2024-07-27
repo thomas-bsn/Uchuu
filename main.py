@@ -5,8 +5,9 @@ from discord.ext import commands
 TOKEN = 'OTg5NTEzNTIzMzU5MDA2ODAw.GBxAHz.LuyFaEMiQounD4sPoUKW7LVpIArP1L2a516E98'
 
 intents = discord.Intents.default()
+intents.members = True
 intents.message_content = True  # Ajoutez cette ligne pour activer l'intent message_content
-bot = commands.Bot(command_prefix='$', intents=intents)
+bot = commands.Bot(command_prefix='$$', intents=intents)
 
 @bot.event
 async def on_ready():
@@ -23,5 +24,6 @@ async def on_ready():
     await bot.load_extension('functions.clean')
     await bot.load_extension('functions.citation')
     await bot.load_extension('functions.samy')
+    await bot.load_extension('functions.profile_pictures')
 
 bot.run(TOKEN)

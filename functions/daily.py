@@ -9,7 +9,7 @@ temps = 600
 class Daily(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.channel_id = 1095149174430900335  # ID du channel où envoyer le message 801074831897526304
+        self.channel_id = 1247650426166317108  # ID du channel où envoyer le message 801074831897526304
         self.blagues_folder = 'include/blagues'
         self.send_random_message.start()  # Démarrer la boucle asynchrone
 
