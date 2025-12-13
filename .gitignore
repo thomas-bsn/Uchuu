@@ -1,0 +1,7 @@
+__pycache__/
+*.zip
+pp_members/
+include/pictures/
+include/traitement_video
+null
+*.json

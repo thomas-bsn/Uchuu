@@ -11,10 +11,13 @@ class ProfilePictures(commands.Cog):
     async def download_pp(self, ctx):
         if not os.path.exists('pp_members'):
             os.makedirs('pp_members')
-
+        for file in os.listdir('pp_members'):
+            os.remove(os.path.join('pp_members', file))
         await ctx.guild.chunk()
         print([member.name for member in ctx.guild.members])
         for member in ctx.guild.members:
+            if member.bot:
+                continue
             if member.avatar:
                 avatar_url = member.avatar.url
                 response = requests.get(avatar_url)
