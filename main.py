@@ -16,14 +16,14 @@ async def on_ready():
     await bot.load_extension('functions.ping')  # Modifiez cette ligne pour charger l'extension ping
     await bot.load_extension('functions.on_message')  # Modifiez cette ligne pour charger l'extension on_message
     await bot.load_extension('functions.helps')  # Modifiez cette ligne pour charger l'extension commands
-    await bot.load_extension('functions.daily')  # Modifiez cette ligne pour charger l'extension daily
+    # await bot.load_extension('functions.daily')  # Modifiez cette ligne pour charger l'extension daily
     # await bot.load_extension('functions.kenza')  # Modifiez cette ligne pour charger l'extension kenza
-    await bot.load_extension('functions.target')  
-    await bot.load_extension('functions.agresseur')
-    await bot.load_extension('functions.echo')
-    await bot.load_extension('functions.clean')
-    await bot.load_extension('functions.citation')
-    await bot.load_extension('functions.samy')
+    # await bot.load_extension('functions.target')  
+    # await bot.load_extension('functions.agresseur')
+    # await bot.load_extension('functions.echo')
+    # await bot.load_extension('functions.clean')
+    # await bot.load_extension('functions.citation')
+    # await bot.load_extension('functions.samy')
     await bot.load_extension('functions.profile_pictures')
-
+    await bot.load_extension("functions.verification.cog")
 bot.run(TOKEN)
