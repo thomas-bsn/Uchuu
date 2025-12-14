@@ -13,17 +13,17 @@ bot = commands.Bot(command_prefix='$$', intents=intents)
 async def on_ready():
     print(f'{bot.user.name} est prêt.')
     await bot.change_presence(activity=discord.Game("Je ferai l'inaceptable"))
-    await bot.load_extension('functions.ping')  # Modifiez cette ligne pour charger l'extension ping
-    await bot.load_extension('functions.on_message')  # Modifiez cette ligne pour charger l'extension on_message
-    await bot.load_extension('functions.helps')  # Modifiez cette ligne pour charger l'extension commands
-    # await bot.load_extension('functions.daily')  # Modifiez cette ligne pour charger l'extension daily
-    # await bot.load_extension('functions.kenza')  # Modifiez cette ligne pour charger l'extension kenza
-    # await bot.load_extension('functions.target')  
-    # await bot.load_extension('functions.agresseur')
-    # await bot.load_extension('functions.echo')
-    # await bot.load_extension('functions.clean')
-    # await bot.load_extension('functions.citation')
-    # await bot.load_extension('functions.samy')
-    await bot.load_extension('functions.profile_pictures')
-    await bot.load_extension("functions.verification.cog")
+    await bot.load_extension('commands.ping')  # Modifiez cette ligne pour charger l'extension ping
+    await bot.load_extension('commands.on_message')  # Modifiez cette ligne pour charger l'extension on_message
+    await bot.load_extension('commands.helps')  # Modifiez cette ligne pour charger l'extension commands
+    # await bot.load_extension('commands.daily')  # Modifiez cette ligne pour charger l'extension daily
+    # await bot.load_extension('commands.kenza')  # Modifiez cette ligne pour charger l'extension kenza
+    # await bot.load_extension('commands.target')  
+    # await bot.load_extension('commands.agresseur')
+    # await bot.load_extension('commands.echo')
+    await bot.load_extension('commands.clean')
+    # await bot.load_extension('commands.citation')
+    # await bot.load_extension('commands.samy')
+    await bot.load_extension('commands.profile_pictures')
+    await bot.load_extension("cogs.verification")
 bot.run(TOKEN)

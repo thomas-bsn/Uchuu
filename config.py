@@ -25,11 +25,10 @@ CHANNEL_LOGS_ID = 1449456760598433812
 # =========================
 
 APPROVALS_REQUIRED = 1
-DENY_REQUIRED = 1
-VOTE_WINDOW_SECONDS = 60
+VOTE_WINDOW_SECONDS = 10
 
 ACTIVITY_THRESHOLD = 5  # Nombre de messages à envoyer en 7 jours
-MIN_MEMBERSHIP_DAYS = 0  # Nombre de jours minimum sur le serveur
+MIN_MEMBERSHIP_DAYS = 7  # Nombre de jours minimum sur le serveur
 
 # Optionnels (tu peux laisser comme ça)
 KICK_GRACE_SECONDS = 30 # petite marge avant kick auto

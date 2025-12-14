@@ -6,7 +6,7 @@ from .service import VerificationService
 from .scheduler import ExpiryScheduler
 from .tasks import TaskScheduler
 from .views import VoteView
-from .config import GUILD_ID, ROLE_INVITE_ID, CHANNEL_LOGS_ID, CHANNEL_VALIDATION_ID, APPROVALS_REQUIRED, VOTE_WINDOW_SECONDS, DEBUG, VOTE_MESSAGE_TEMPLATE
+from .config import *
 
 class Verification(commands.Cog):
     def __init__(self, bot):
