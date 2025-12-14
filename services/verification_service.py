@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from discord.ext import tasks
 import discord
-from config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, CHANNEL_LOGS_ID, VOTE_WINDOW_SECONDS
+from config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, CHANNEL_LOGS_ID, KICK_DM_MESSAGE
 from utils.logger import Logger
 
 class VerificationService:
@@ -113,7 +113,7 @@ class VerificationService:
 
             # Si le rôle invité n'a pas été retiré, procéder au kick comme prévu
             try:
-                await member.send("Votre invitation a expiré et vous avez été expulsé.")
+                await member.send(KICK_DM_MESSAGE)
                 await guild.kick(member, reason="Verification expired")
             except Exception as e:
                 await self.logger.error(f"Erreur lors de l'expulsion de {member.mention} ({user_id}): {str(e)}")
@@ -161,7 +161,7 @@ class VerificationService:
                 
                 # Logguer dans #logs
                 approvers_mentions = ", ".join(f"<@{uid}>" for uid in approvers_ids) if approvers_ids else "Aucun"
-                await self.logger.log_promotion(member, approvers_mentions)
+                await self.logger.log_promotion(member, approvers_mentions, role_promoted="Membre")
                 return f"✅ **Invitation approuvée** — {member.mention} a été promu au rôle 'Membre'."
 
             except discord.Forbidden:
