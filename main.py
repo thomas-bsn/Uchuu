@@ -26,4 +26,5 @@ async def on_ready():
     # await bot.load_extension('commands.samy')
     await bot.load_extension('commands.profile_pictures')
     await bot.load_extension("cogs.verification")
+    await bot.load_extension("cogs.confiance_promotion")
 bot.run(TOKEN)

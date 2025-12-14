@@ -27,11 +27,9 @@ CHANNEL_LOGS_ID = 1449456760598433812
 APPROVALS_REQUIRED = 1
 VOTE_WINDOW_SECONDS = 10
 
-ACTIVITY_THRESHOLD = 5  # Nombre de messages à envoyer en 7 jours
-MIN_MEMBERSHIP_DAYS = 7  # Nombre de jours minimum sur le serveur
+MIN_MEMBERSHIP_DAYS = 0  # Nombre de jours minimum sur le serveur
 
 # Optionnels (tu peux laisser comme ça)
-KICK_GRACE_SECONDS = 30 # petite marge avant kick auto
 KICK_AUDIT_REASON = "Verification timeout"
 
 
@@ -43,8 +41,20 @@ VOTE_MESSAGE_TEMPLATE = (
     "🔐 **Nouvel invité**\n\n"
     "Utilisateur: {user}\n"
     "Votes requis: {required}\n"
-    "Expiration: <t:{expires_at}:R>\n\n"
-    "Votes actuels: {current}/{required}"
+    "Expiration: <t:{expires_at}:R>\n"
+    "Votes actuels: {current}/{required}\n\n"
+
+    "**Rôle Confiance** : {confiance_mention}\n\n"
+)
+
+VOTE_PROMOTION_MESSAGE_TEMPLATE = (
+    "🔐 **Nouveau vote de promotion**\n\n"
+    "Utilisateur: {user}\n"
+    "Votes requis: {required}\n"
+    "Expiration: <t:{expires_at}:R>\n"
+    "Votes actuels: {current}/{required}\n\n"
+
+    "**Rôle Confiance** : {confiance_mention}\n\n"
 )
 
 VOTE_APPROVED_MESSAGE = "✅ **Validé** — accès accordé."

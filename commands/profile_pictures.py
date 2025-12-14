@@ -12,13 +12,13 @@ class ProfilePictures(commands.Cog):
         print("Commande download_pp lancée.")
 
         # Crée le dossier pour stocker les avatars
-        if not os.path.exists('pp_members'):
-            os.makedirs('pp_members')
+        if not os.path.exists('include/pp_members'):
+            os.makedirs('include/pp_members')
             print("Répertoire 'pp_members' créé.")
 
         # Vide le répertoire s'il existe déjà
-        for file in os.listdir('pp_members'):
-            os.remove(os.path.join('pp_members', file))
+        for file in os.listdir('include/pp_members'):
+            os.remove(os.path.join('include/pp_members', file))
             print(f"Fichier supprimé: {file}")
 
         # Utilisation de ctx.guild.members pour récupérer les membres directement
@@ -40,7 +40,7 @@ class ProfilePictures(commands.Cog):
                 if response.status_code == 200:
                     print(f"Avatar de {member.name} téléchargé avec succès.")
                     sanitized_name = "".join([c if c.isalnum() else "_" for c in member.name])
-                    file_path = os.path.join('pp_members', f'{sanitized_name}.png')
+                    file_path = os.path.join('include/pp_members', f'{sanitized_name}.png')
                     
                     # Sauvegarde l'avatar en local
                     with open(file_path, 'wb') as file:
