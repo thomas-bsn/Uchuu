@@ -3,7 +3,7 @@ from discord.ext import commands
 from datetime import datetime, timezone
 from services.verification_service import VerificationService
 from views.vote_view import VoteView
-from config import *
+from discord_config import *
 from utils.logger import Logger
 
 class Verification(commands.Cog):

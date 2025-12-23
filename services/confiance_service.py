@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import discord
 from discord.ext import tasks
-from config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, ROLE_CONFIANCE_ID, CHANNEL_LOGS_ID, VOTE_WINDOW_SECONDS
+from discord_config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, ROLE_CONFIANCE_ID, CHANNEL_LOGS_ID, VOTE_WINDOW_SECONDS
 from utils.logger import Logger
 
 class ConfiancePromotionService:
@@ -9,7 +9,6 @@ class ConfiancePromotionService:
         self.bot = bot
         self.pending_votes = {}  # Dictionnaire pour les votes en attente
         self.logger = Logger(bot)  # Logger pour enregistrer les événements
-        self.check_expired_votes.start()  # Démarre la vérification périodique des votes expirés
 
     def add_pending_vote(self, guild_id, target_id, yes, no, message_id, channel_id, expires_at_ts):
         """Ajoute un vote en attente"""
@@ -24,6 +23,7 @@ class ConfiancePromotionService:
     @tasks.loop(seconds=10)  # Vérifie toutes les 10 secondes
     async def check_expired_votes(self):
         """Vérifie les votes expirés et supprime ceux qui n'ont pas été décidés."""
+        await self.bot.wait_until_ready()
         now = int(datetime.now(timezone.utc).timestamp())  # Temps actuel
         to_remove = []  # Liste pour les votes expirés sans décision
 
@@ -36,6 +36,10 @@ class ConfiancePromotionService:
         # Supprimer les votes expirés
         for guild_id, target_id in to_remove:
             await self.remove_expired_vote(guild_id, target_id)
+
+    @check_expired_votes.error
+    async def check_expired_votes_error(self, exc):
+        await self.logger.error(f"❌ [promotion] check_expired_votes crashed: {exc!r}")
 
     async def remove_expired_vote(self, guild_id: int, target_id: int):
         """Supprime un vote expiré et le message associé."""

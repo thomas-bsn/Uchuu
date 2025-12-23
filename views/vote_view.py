@@ -1,6 +1,6 @@
 import discord
 from discord.ui import View, Button
-from config import ROLE_CONFIANCE_ID
+from discord_config import ROLE_CONFIANCE_ID
 
 class VoteView(discord.ui.View):
     def __init__(self, service, target_id: int):

@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timezone
-from config import *
+from discord_config import *
 from utils.logger import Logger
 from services.confiance_service import ConfiancePromotionService
 from views.vote_view import VoteView
@@ -12,14 +12,20 @@ class ConfiancePromotionCog(commands.Cog):
         self.bot = bot
         self.service = ConfiancePromotionService(bot)
         self.logger = Logger(bot)
-        self.check_promotion.start()  # Démarrer le processus périodique à l'initialisation du cog
+
+    async def cog_load(self):
+        self.service.check_expired_votes.start()
+
+    async def cog_unload(self):
+        self.service.check_expired_votes.cancel()
 
     @tasks.loop(hours=24)  # Vérifie tous les jours
     async def check_promotion(self):
         """Vérifie tous les membres avec le rôle 'Membre' pour promotion automatique au rôle Confiance"""
+        await self.bot.wait_until_ready()
         now = int(datetime.now(timezone.utc).timestamp())
         guild = self.bot.get_guild(GUILD_ID)
-        logs_channel = guild.get_channel(CHANNEL_VALIDATION_ID)
+        logs_channel = guild.get_channel(CHANNEL_LOGS_ID)
 
         if guild is None or logs_channel is None:
             return  # On ne peut pas procéder sans la guild ou le channel de logs

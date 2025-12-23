@@ -1,30 +1,39 @@
+import asyncio
+import threading
 import discord
 from discord.ext import commands
+import uvicorn
 
-# Remplacez ceci par le jeton d'accès de votre bot
-TOKEN = 'OTg5NTEzNTIzMzU5MDA2ODAw.GBxAHz.LuyFaEMiQounD4sPoUKW7LVpIArP1L2a516E98'
+import runtime_config as rt
+import discord_config as dc
+from internal_api import create_internal_api
 
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True  # Ajoutez cette ligne pour activer l'intent message_content
-bot = commands.Bot(command_prefix='$$', intents=intents)
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        # Ici on est dans le bon contexte async, donc OK
+        self.runtime_loop = asyncio.get_running_loop()
+
+        # charge tes extensions ici plutôt que on_ready
+        for ext in dc.EXTENSIONS:
+            await self.load_extension(ext)
+
+bot = MyBot(command_prefix=rt.BOT_PREFIX, intents=discord.Intents.all())
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user.name} est prêt.')
-    await bot.change_presence(activity=discord.Game("Je ferai l'inaceptable"))
-    await bot.load_extension('commands.ping')  # Modifiez cette ligne pour charger l'extension ping
-    await bot.load_extension('commands.on_message')  # Modifiez cette ligne pour charger l'extension on_message
-    await bot.load_extension('commands.helps')  # Modifiez cette ligne pour charger l'extension commands
-    # await bot.load_extension('commands.daily')  # Modifiez cette ligne pour charger l'extension daily
-    # await bot.load_extension('commands.kenza')  # Modifiez cette ligne pour charger l'extension kenza
-    # await bot.load_extension('commands.target')  
-    # await bot.load_extension('commands.agresseur')
-    # await bot.load_extension('commands.echo')
-    await bot.load_extension('commands.clean')
-    # await bot.load_extension('commands.citation')
-    # await bot.load_extension('commands.samy')
-    await bot.load_extension('commands.profile_pictures')
-    await bot.load_extension("cogs.verification")
-    await bot.load_extension("cogs.confiance_promotion")
-bot.run(TOKEN)
+    print(f"{bot.user.name} est prêt.")
+    await bot.change_presence(activity=discord.Game(rt.BOT_STATUS))
+
+def run_internal_api():
+    app = create_internal_api(bot)
+    config = uvicorn.Config(
+        app,
+        host=rt.INTERNAL_API_HOST,   # 127.0.0.1
+        port=rt.INTERNAL_API_PORT,   # 9000
+        log_level="info",
+    )
+    uvicorn.Server(config).run()
+
+if __name__ == "__main__":
+    threading.Thread(target=run_internal_api, daemon=True).start()
+    bot.run(rt.DISCORD_TOKEN)

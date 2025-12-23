@@ -1,4 +1,18 @@
 # =========================
+# EXTENSIONS (COMMANDS / COGS)
+# =========================
+
+EXTENSIONS = [
+    "commands.ping",
+    "commands.on_message",
+    "commands.helps",
+    "commands.clean",
+    "commands.profile_pictures",
+    "cogs.verification",
+    "cogs.confiance_promotion",
+]
+
+# =========================
 # SERVER CONFIG
 # =========================
 
