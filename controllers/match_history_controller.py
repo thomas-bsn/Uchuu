@@ -13,7 +13,7 @@ router = APIRouter(prefix="/internal/matches", tags=["internal-matches"])
 async def post_match_history_image(
     request: Request,
     image: UploadFile = File(...),
-    channel_id: int | None = Form(default=1453034456460951552),
+    channel_id: int | None = Form(default=1453089131512070267),
     caption: str | None = Form(default=None),
     x_internal_key: str = Header(...),
 ):
