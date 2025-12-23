@@ -1,5 +1,5 @@
 import discord
-from config import CHANNEL_LOGS_ID
+from discord_config import CHANNEL_LOGS_ID
 from datetime import datetime, timezone
 
 class Logger:

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from discord.ext import tasks
 import discord
-from config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, CHANNEL_LOGS_ID, KICK_DM_MESSAGE
+from discord_config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, CHANNEL_LOGS_ID, KICK_DM_MESSAGE
 from utils.logger import Logger
 
 class VerificationService:
