@@ -4,10 +4,10 @@ import importlib
 
 import pytest
 
-import discord_config as dc
+from main import EXTENSIONS
 
 
-@pytest.mark.parametrize("extension", dc.EXTENSIONS)
+@pytest.mark.parametrize("extension", EXTENSIONS)
 def test_declared_extension_imports_with_declared_dependencies(extension):
     module = importlib.import_module(extension)
 
