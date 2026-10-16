@@ -23,11 +23,16 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _teams(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    teams = data.get("teams")
-    if not isinstance(teams, dict):
-        return {}
-    return {key: teams[key] for key in TEAM_KEYS if isinstance(teams.get(key), dict)}
+def teams_of(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """{"A": team_a, "B": team_b} — même forme de Teams que teams_formed (#4)."""
+    teams = {}
+    for key in TEAM_KEYS:
+        team = data.get(f"team_{key.lower()}")
+        if isinstance(team, dict):
+            teams[key] = team
+    return teams
+
+
 
 
 def _team_name(teams: dict[str, dict[str, Any]], key: str) -> str:
@@ -103,7 +108,7 @@ def player_line(p: dict[str, Any]) -> str:
 
 
 def series_announcement(data: dict[str, Any], web_url: str | None = None) -> discord.Embed:
-    teams = _teams(data)
+    teams = teams_of(data)
     title = f"⚔️ {_series_label(data)} : {_team_name(teams, 'A')} vs {_team_name(teams, 'B')}"
     embed = discord.Embed(
         title=_clip(title, TITLE_MAX),
@@ -121,7 +126,7 @@ def series_announcement(data: dict[str, Any], web_url: str | None = None) -> dis
 
 
 def game_recap(data: dict[str, Any], web_url: str | None = None) -> discord.Embed:
-    teams = _teams(data)
+    teams = teams_of(data)
     winner = data.get("winner") if data.get("winner") in TEAM_KEYS else None
     game_number = data.get("game_number")
     game_label = f"Game {game_number}" if game_number else "Game"

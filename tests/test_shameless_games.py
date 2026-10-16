@@ -33,7 +33,9 @@ def game_started(game_id="g-1", game_number=1, series_id="s-1", **extra):
         "game_id": game_id,
         "game_number": game_number,
         "best_of": 3,
-        "teams": {"A": TEAM_A, "B": TEAM_B},
+        # même forme de Teams que teams_formed (#4)
+        "team_a": TEAM_A,
+        "team_b": TEAM_B,
         "participant_discord_ids": PARTICIPANTS,
         **extra,
     }
@@ -50,16 +52,14 @@ def game_completed(game_id="g-1", game_number=1, series_id="s-1", **overrides):
         "series_score": {"A": 1, "B": 0},
         "duration_seconds": 1834,
         "recap_url": f"https://shameless.example/games/{game_id}",
-        "teams": {
-            "A": team("Les Chauves", "blue", [
-                player("Zed Main", "101", champion="Zed", role="MID", kills=12, deaths=3, assists=7,
-                       cs=243, cs_per_min=7.9, kill_participation=0.61, damage=31250, performance_score=88),
-            ]),
-            "B": team("Les Barbus", "red", [
-                player("Feeder", "201", champion="Yuumi", role="SUPPORT", kills=0, deaths=11, assists=4,
-                       cs=12, cs_per_min=0.4, kill_participation=0.33, damage=4100, performance_score=12),
-            ]),
-        },
+        "team_a": team("Les Chauves", "blue", [
+            player("Zed Main", "101", champion="Zed", role="MID", kills=12, deaths=3, assists=7,
+                   cs=243, cs_per_min=7.9, kill_participation=0.61, damage=31250, performance_score=88),
+        ]),
+        "team_b": team("Les Barbus", "red", [
+            player("Feeder", "201", champion="Yuumi", role="SUPPORT", kills=0, deaths=11, assists=4,
+                   cs=12, cs_per_min=0.4, kill_participation=0.33, damage=4100, performance_score=12),
+        ]),
         "participant_discord_ids": PARTICIPANTS,
     }
     data.update(overrides)
@@ -177,7 +177,8 @@ async def test_every_completed_game_of_a_series_gets_its_own_recap(guild, games,
 async def test_recap_without_optional_fields_still_posts_readable_embed(guild, games, client, post_event):
     event = make_event("game_completed", {
         "game_id": "g-9",
-        "teams": {"A": {"players": [{"name": "Solo"}]}, "B": {"players": [{"discord_id": "5"}]}},
+        "team_a": {"players": [{"name": "Solo"}]},
+        "team_b": {"players": [{"discord_id": "5"}]},
     })
 
     response = await post_event(client, event)

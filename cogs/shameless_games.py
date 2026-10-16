@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from services.shameless_events import EVENT_GAME_COMPLETED, EVENT_GAME_STARTED, ShamelessEvent, get_dispatcher
 from services.shameless_games_store import GameAttendanceStore, GamePostsStore
-from services.shameless_recap import game_recap, series_announcement
+from services.shameless_recap import game_recap, series_announcement, teams_of
 from shameless_config import ShamelessSettings
 
 logger = logging.getLogger(__name__)
@@ -24,10 +24,9 @@ def participant_ids(data: dict[str, Any]) -> set[str]:
     """IDs Discord des Joueurs liés de la Game (contrat API), sinon déduits des Teams."""
     ids = data.get("participant_discord_ids")
     if not isinstance(ids, list):
-        teams = data.get("teams") if isinstance(data.get("teams"), dict) else {}
         ids = [
             p.get("discord_id")
-            for team in teams.values() if isinstance(team, dict)
+            for team in teams_of(data).values()
             for p in team.get("players") or [] if isinstance(p, dict)
         ]
     return {str(i) for i in ids if i}
