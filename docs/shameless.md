@@ -76,6 +76,45 @@ Réponses :
 L'`event_id` est persisté dans SQLite **avant** l'exécution du handler et l'accusé de réception :
 le choix est « au plus une fois » pour les effets Discord (pas de double move / annonce / récap).
 
+## Annonces, récaps et présences par Game (`game_started` / `game_completed`)
+
+Cog `cogs.shameless_games`. Messages publiés dans `SHAMELESS_ANNOUNCE_CHANNEL_ID` (si absent : rien n'est publié, l'event est acquitté).
+
+Snapshot `game_started` attendu :
+
+```json
+{
+  "series_id": "s-1", "game_id": "g-1", "game_number": 1, "best_of": 3,
+  "series_url": "https://…/series/s-1",
+  "teams": {
+    "A": { "name": "Les Chauves", "side": "blue", "players": [{ "name": "Zed Main", "discord_id": "101" }] },
+    "B": { "name": "Les Barbus", "side": "red", "players": [ … ] }
+  },
+  "participant_discord_ids": ["101", "…"]
+}
+```
+
+Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
+
+```json
+{
+  "series_id": "s-1", "game_id": "g-1", "game_number": 1, "best_of": 3,
+  "winner": "A", "series_score": { "A": 1, "B": 0 }, "duration_seconds": 1834,
+  "recap_url": "https://…/games/g-1",
+  "teams": { "A": { "name": "…", "side": "blue", "players": [{
+      "name": "Zed Main", "discord_id": "101", "champion": "Zed", "role": "MID",
+      "kills": 12, "deaths": 3, "assists": 7, "cs": 243, "cs_per_min": 7.9,
+      "kill_participation": 0.61, "damage": 31250, "performance_score": 88 }] },
+    "B": { … } },
+  "participant_discord_ids": ["101", "…"]
+}
+```
+
+- **Annonce de Série** : au `game_started` de la Game n°1 (ou sans `game_number`), une seule fois par `series_id`, même si l'API republie avec un autre `event_id` ou après redémarrage.
+- **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Pas de vote MVP/DOFD (Phase 2).
+- Si l'envoi Discord échoue, le webhook répond 500 et le retry republie.
+- **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans les salons commun / Team 1 / Team 2 (présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). Lecture (Phase 2) : `GameAttendanceStore(db_path).spectators(game_id)`.
+
 ## Docker
 
 ```sh
@@ -94,6 +133,7 @@ docker compose up -d --build
 - Scopes d'installation : `bot` et `applications.commands`.
 - Gateway intents privilégiés : activez **Server Members Intent**, car le bot lit les membres présents en vocal (`main.py` démarre avec `Intents.all()`). L'intent `voice_states` (non privilégié) est indispensable.
 - Permissions serveur : **View Channels** sur les salons vocaux à inspecter.
+- Salon d'annonce (`SHAMELESS_ANNOUNCE_CHANNEL_ID`) : **Send Messages** et **Embed Links**.
 
 ## Tests
 
