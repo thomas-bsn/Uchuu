@@ -99,16 +99,16 @@ Shameless envoie `teams_formed` quand le Picker valide les Teams et la Série, a
 
 Cog `cogs.shameless_games`. Messages publiés dans `SHAMELESS_ANNOUNCE_CHANNEL_ID` (si absent : rien n'est publié, l'event est acquitté).
 
+Teams au même format que `teams_formed` (`team_a` / `team_b`) ; `winner` et `series_score` utilisent `A` / `B`.
+
 Snapshot `game_started` attendu :
 
 ```json
 {
   "series_id": "s-1", "game_id": "g-1", "game_number": 1, "best_of": 3,
   "series_url": "https://…/series/s-1",
-  "teams": {
-    "A": { "name": "Les Chauves", "side": "blue", "players": [{ "name": "Zed Main", "discord_id": "101" }] },
-    "B": { "name": "Les Barbus", "side": "red", "players": [ … ] }
-  },
+  "team_a": { "name": "Les Chauves", "side": "blue", "players": [{ "name": "Zed Main", "discord_id": "101" }] },
+  "team_b": { "name": "Les Barbus", "side": "red", "players": [ … ] },
   "participant_discord_ids": ["101", "…"]
 }
 ```
@@ -120,11 +120,11 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
   "series_id": "s-1", "game_id": "g-1", "game_number": 1, "best_of": 3,
   "winner": "A", "series_score": { "A": 1, "B": 0 }, "duration_seconds": 1834,
   "recap_url": "https://…/games/g-1",
-  "teams": { "A": { "name": "…", "side": "blue", "players": [{
+  "team_a": { "name": "…", "side": "blue", "players": [{
       "name": "Zed Main", "discord_id": "101", "champion": "Zed", "role": "MID",
       "kills": 12, "deaths": 3, "assists": 7, "cs": 243, "cs_per_min": 7.9,
       "kill_participation": 0.61, "damage": 31250, "performance_score": 88 }] },
-    "B": { … } },
+  "team_b": { … },
   "participant_discord_ids": ["101", "…"]
 }
 ```
