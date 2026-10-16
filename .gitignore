@@ -5,3 +5,7 @@ include/pictures/
 include/traitement_video
 null
 *.json
+data/
+.venv/
+.pytest_cache/
+.env
