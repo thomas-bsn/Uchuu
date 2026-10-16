@@ -54,3 +54,14 @@ Variables `SHAMELESS_*`, toutes optionnelles : voir `docs/shameless.md`.
 ## Persistance
 
 Le volume Docker monté sur `/data` contient `shameless.sqlite3` et `votes.sqlite3`. Il doit survivre aux redéploiements (dédup Shameless, état des votes).
+
+### Base des votes (`votes.sqlite3`)
+
+- Contient chaque vote (cible, type, échéance, statut, message Discord associé) et ses bulletins ✅. Les votes clos restent en base (historique, cooldown Confiance).
+- Un redémarrage ne perd rien : les boutons ✅ des messages déjà postés refonctionnent (identifiant stable `vote:<id>:approve`), et un vote ouvert expire à l'heure prévue (vérification toutes les 30 s).
+- Ne supprimez pas ce fichier pendant qu'un vote est ouvert : ses boutons répondraient « vote terminé » et l'Invité ne serait jamais expulsé. Sauvegarde : copiez le fichier bot arrêté (mode WAL : copiez aussi `votes.sqlite3-wal` / `-shm` s'ils existent).
+- Hors Docker, `VOTES_DB_PATH` doit pointer vers un chemin persistant accessible en écriture.
+
+## Flux d'admission (Invité → Membre)
+
+À l'arrivée d'un membre (hors bots) sur `GUILD_ID` : rôle Invité et message de vote dans `CHANNEL_VALIDATION_ID`, avec un bouton ✅. Seuls les membres Confiance votent, jamais pour eux-mêmes ; un double clic ne compte qu'une fois. Au quorum (`VOTE_APPROVALS_REQUIRED`) : Invité → Membre, message supprimé, log avec les votants. À l'expiration (`INVITE_VOTE_WINDOW_SECONDS`) : DM puis kick, sauf si le rôle Invité a été retiré à la main (admission manuelle) ; message supprimé, log. Serveur, rôle ou salon introuvable : le problème est posté dans `CHANNEL_LOGS_ID` (ou les logs du process si ce salon manque), le bot continue.
