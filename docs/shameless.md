@@ -11,11 +11,14 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_WEBHOOK_SECRET` | Secret HMAC partagé avec l'API pour signer les webhooks API -> bot. Vide = le callback répond 503. |
 | `SHAMELESS_WEBHOOK_TOLERANCE_SECONDS` | Écart max accepté entre `X-Shameless-Timestamp` et l'horloge du bot (défaut 300). |
 | `SHAMELESS_HANDLER_TIMEOUT_SECONDS` | Délai max d'un handler Discord avant réponse 504 (défaut 30). |
+| `SHAMELESS_CLAIM_LEASE_SECONDS` | Durée de réservation d'un event en cours de traitement (défaut 120). Passé ce délai (crash, timeout), un retry le reprend. Doit rester supérieur au timeout handler. |
 | `SHAMELESS_DB_PATH` | Fichier SQLite local (dédup webhooks, présences). En Docker : `/data/shameless.sqlite3`. |
 | `SHAMELESS_SHARED_VOICE_ID`, `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux commun / Team 1 / Team 2. |
 | `SHAMELESS_ANNOUNCE_CHANNEL_ID` | Salon texte des annonces et récaps. |
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
+
+Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), **le bot n'appelle jamais l'API Shameless**. Aucune URL d'API ni credential bot -> API n'est donc provisionné côté bot (pas de credential inutilisé). `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
 
 Credentials : générez des valeurs aléatoires longues (par ex. `openssl rand -hex 32`), stockez-les dans l'env du bot et dans celle de l'API. Rotation = changer les deux env puis redémarrer, aucun changement de code.
 
@@ -40,8 +43,10 @@ Erreurs : `401` si le credential est absent ou faux. `503` si le bot n'est pas p
 
 ## Callback webhook
 
-`POST /internal/shameless/webhook`, exposé en HTTPS par le reverse proxy public
-(ex. `https://bot.example.org/internal/shameless/webhook` -> `http://127.0.0.1:9000`).
+`POST /internal/shameless/webhook`, exposé en HTTPS par le reverse proxy public.
+L'URL de callback à configurer côté API est `https://<hôte public du bot>/internal/shameless/webhook`
+(même chemin derrière le proxy, ex. `https://bot.example.org/internal/shameless/webhook` -> `http://127.0.0.1:9000/internal/shameless/webhook`).
+Idem pour `GET https://<hôte public du bot>/internal/shameless/voice-candidates`.
 
 Headers :
 
@@ -65,16 +70,26 @@ Réponses :
 | Code | Corps | Sens pour l'émetteur |
 | --- | --- | --- |
 | 200 | `{"status": "processed"}` | Traité. |
-| 200 | `{"status": "duplicate"}` | `event_id` déjà pris en charge (même après redémarrage) : rien n'est rejoué. |
+| 200 | `{"status": "duplicate"}` | `event_id` déjà **traité avec succès** (même après redémarrage) : rien n'est rejoué. |
 | 200 | `{"status": "ignored"}` | Type sans handler : acquitté, non enregistré. |
 | 401 | | Signature absente, invalide ou expirée. |
+| 409 | `{"detail": "in_progress"}` | Une autre livraison de cet `event_id` est en cours : **retenter** plus tard. |
 | 422 | | Enveloppe invalide ou version non supportée. |
 | 500 | | Le handler a échoué : réservation annulée, **retenter**. |
 | 503 | | Secret non configuré ou bot pas encore prêt : retenter. |
-| 504 | | Handler trop long : état Discord inconnu, l'`event_id` reste réservé et ne sera pas rejoué. |
+| 504 | | Handler trop long (annulé) : **retenter**. La réservation expire après `SHAMELESS_CLAIM_LEASE_SECONDS` (409 d'ici là), puis le retry est exécuté. |
 
-L'`event_id` est persisté dans SQLite **avant** l'exécution du handler et l'accusé de réception :
-le choix est « au plus une fois » pour les effets Discord (pas de double move / annonce / récap).
+L'`event_id` est réservé dans SQLite (`processing`) **avant** l'exécution du handler, puis marqué
+`done` après succès. Seul `done` répond `duplicate` : un event en cours, échoué, interrompu par un
+timeout ou par un crash du bot finit par être ré-exécuté par un retry (« au moins une fois »).
+Les effets Discord restent idempotents : un membre déjà dans son vocal d'équipe n'est pas
+re-déplacé, et chaque annonce / récap est gardé par `(type, series_id | game_id)` en SQLite.
+
+Compromis restant (« au plus une fois » pour les messages) : la garde d'un message est posée
+juste avant `send`. Si Discord publie le message mais que le bot plante ou que le handler expire
+avant d'avoir reçu la réponse, la garde est libérée (timeout) et le retry peut republier ce
+message (doublon possible), ou bien elle est conservée (crash) et le message n'est jamais
+republié. Ces cas exigent une panne au moment exact de l'envoi.
 
 ## Moves d'équipe (`teams_formed`)
 
@@ -88,16 +103,17 @@ Shameless envoie `teams_formed` quand le Picker valide les Teams et la Série, a
 }
 ```
 
-- Team A va dans `SHAMELESS_TEAM1_VOICE_ID`, Team B dans `SHAMELESS_TEAM2_VOICE_ID`, pour toute la Série et quel que soit le côté bleu/rouge.
+- Mapping unique (`services.shameless_payloads.team_voice_ids`) : Team A va dans `SHAMELESS_TEAM1_VOICE_ID`, Team B dans `SHAMELESS_TEAM2_VOICE_ID`, pour toute la Série et quel que soit le côté bleu/rouge.
 - Sont déplacés uniquement les Joueurs dont le `discord_id` est fourni (string, snowflake) et qui sont connectés à un vocal du serveur. Les Joueurs sans lien Discord, les membres hors vocal et les Spectateurs ne bougent pas.
 - Un membre déjà dans son vocal d'équipe n'est pas redéplacé. Si un move échoue (permissions, membre parti), l'erreur est loguée et les autres moves continuent.
 - Si le serveur ou un vocal d'équipe est introuvable, le bot ne déplace personne et répond `500` : Shameless retente avec le même `event_id`.
+- Payload mal formé (Team absente, `players` null ou pas une liste, `discord_id` invalide) : la partie invalide est ignorée et loguée, le reste est traité et l'event est acquitté `processed`. Un retry ne réparerait jamais le payload, donc pas de boucle de `500`.
 - Un seul move par Série : `game_started` / `game_completed` ne déplacent personne. Les joueurs reviennent au vocal commun entre les Games et rejoignent leur vocal d'équipe quand ils veulent.
-- Permission Discord requise : **Move Members** (Déplacer des membres) sur les salons commun, Team 1 et Team 2.
+- Permissions Discord requises sur les salons commun, Team 1 et Team 2 : **View Channel**, **Connect** et **Move Members** (Discord exige que le bot puisse voir et rejoindre le salon cible pour y déplacer quelqu'un).
 
 ## Annonces, récaps et présences par Game (`game_started` / `game_completed`)
 
-Cog `cogs.shameless_games`. Messages publiés dans `SHAMELESS_ANNOUNCE_CHANNEL_ID` (si absent : rien n'est publié, l'event est acquitté).
+Cog `cogs.shameless_games`. Messages publiés dans `SHAMELESS_ANNOUNCE_CHANNEL_ID`. Si la variable est absente ou si le salon est introuvable / inaccessible, le handler échoue (`500`) : l'event n'est pas marqué traité et le retry de Shameless publie une fois la config corrigée.
 
 Teams au même format que `teams_formed` (`team_a` / `team_b`) ; `winner` et `series_score` utilisent `A` / `B`.
 
@@ -129,7 +145,7 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 }
 ```
 
-- **Annonce de Série** : au `game_started` de la Game n°1 (ou sans `game_number`), une seule fois par `series_id`, même si l'API republie avec un autre `event_id` ou après redémarrage.
+- **Annonce de Série** : au premier `game_started` reçu pour un `series_id` (normalement la Game n°1, mais aussi une Game suivante si celui de la Game 1 a été raté), une seule fois par `series_id`, même si l'API republie avec un autre `event_id` ou après redémarrage.
 - **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Pas de vote MVP/DOFD (Phase 2).
 - Si l'envoi Discord échoue, le webhook répond 500 et le retry republie.
 - **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans les salons commun / Team 1 / Team 2 (présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). Lecture (Phase 2) : `GameAttendanceStore(db_path).spectators(game_id)`.
@@ -150,8 +166,12 @@ docker compose up -d --build
 ## Discord Developer Portal
 
 - Scopes d'installation : `bot` et `applications.commands`.
-- Gateway intents privilégiés : activez **Server Members Intent**, car le bot lit les membres présents en vocal (`main.py` démarre avec `Intents.all()`). L'intent `voice_states` (non privilégié) est indispensable.
-- Permissions serveur : **View Channels** sur les salons vocaux à inspecter.
+- Gateway intents privilégiés : `main.py` démarre avec `discord.Intents.all()`, qui demande **les trois** intents privilégiés. Activez-les tous dans *Bot > Privileged Gateway Intents*, sinon la connexion est refusée :
+  - **Presence Intent** ;
+  - **Server Members Intent** (membres présents en vocal, Joueurs à déplacer) ;
+  - **Message Content Intent** (commandes préfixées des autres cogs).
+  L'intent `voice_states` (non privilégié) est indispensable.
+- Permissions serveur : **View Channels** sur les salons vocaux à inspecter ; **View Channel**, **Connect** et **Move Members** sur les salons commun / Team 1 / Team 2.
 - Salon d'annonce (`SHAMELESS_ANNOUNCE_CHANNEL_ID`) : **Send Messages** et **Embed Links**.
 
 ## Tests

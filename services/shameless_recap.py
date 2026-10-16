@@ -10,7 +10,8 @@ from typing import Any
 
 import discord
 
-TEAM_KEYS = ("A", "B")
+from services.shameless_payloads import TEAM_KEYS, players_of, teams_of
+
 BLUE = 0x3B82F6
 GOLD = 0xF5B942
 
@@ -23,24 +24,8 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def teams_of(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """{"A": team_a, "B": team_b} — même forme de Teams que teams_formed (#4)."""
-    teams = {}
-    for key in TEAM_KEYS:
-        team = data.get(f"team_{key.lower()}")
-        if isinstance(team, dict):
-            teams[key] = team
-    return teams
-
-
-
-
 def _team_name(teams: dict[str, dict[str, Any]], key: str) -> str:
     return str(teams.get(key, {}).get("name") or f"Team {key}")
-
-
-def _players(team: dict[str, Any]) -> list[dict[str, Any]]:
-    return [p for p in team.get("players") or [] if isinstance(p, dict)]
 
 
 def _player_name(p: dict[str, Any]) -> str:
@@ -107,12 +92,19 @@ def player_line(p: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
+def _kickoff(data: dict[str, Any]) -> str:
+    number = _number(data.get("game_number"))
+    if number is not None and number > 1:
+        return f"La Game {number:g} commence, bonne chance à tous."
+    return "La première Game commence, bonne chance à tous."
+
+
 def series_announcement(data: dict[str, Any], web_url: str | None = None) -> discord.Embed:
     teams = teams_of(data)
     title = f"⚔️ {_series_label(data)} : {_team_name(teams, 'A')} vs {_team_name(teams, 'B')}"
     embed = discord.Embed(
         title=_clip(title, TITLE_MAX),
-        description="La première Game commence, bonne chance à tous.",
+        description=_kickoff(data),
         color=BLUE,
     )
     url = _link(data, web_url, url_key="series_url", id_key="series_id", path="series")
@@ -120,7 +112,7 @@ def series_announcement(data: dict[str, Any], web_url: str | None = None) -> dis
         embed.url = url
     for key in TEAM_KEYS:
         team = teams.get(key, {})
-        names = "\n".join(_player_name(p) for p in _players(team)) or "—"
+        names = "\n".join(_player_name(p) for p in players_of(team)) or "—"
         embed.add_field(name=_clip(_team_name(teams, key) + _side(team), TITLE_MAX), value=_clip(names, FIELD_VALUE_MAX), inline=True)
     return embed
 
@@ -154,7 +146,7 @@ def game_recap(data: dict[str, Any], web_url: str | None = None) -> discord.Embe
     for key in TEAM_KEYS:
         team = teams.get(key, {})
         crown = " 🏆" if key == winner else ""
-        lines = "\n".join(player_line(p) for p in _players(team)) or "—"
+        lines = "\n".join(player_line(p) for p in players_of(team)) or "—"
         embed.add_field(name=_clip(_team_name(teams, key) + _side(team) + crown, TITLE_MAX), value=_clip(lines, FIELD_VALUE_MAX), inline=False)
 
     if url:

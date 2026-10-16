@@ -10,6 +10,7 @@ from services.shameless_events import (
     get_dispatcher,
     verify_signature,
 )
+from services.shameless_store import DONE, IN_PROGRESS
 from services.shameless_voice import pick_voice_candidates
 
 logger = logging.getLogger(__name__)
@@ -98,21 +99,26 @@ async def receive_webhook(
 
     require_bot_ready(request)
 
-    # Réservation persistée AVANT d'exécuter / acquitter
+    # Réservation persistée AVANT d'exécuter / acquitter. Seul "done" est un doublon :
+    # une livraison encore en cours répond 409 pour que Shameless retente plus tard.
     store = request.app.state.shameless_events_store
-    if not store.claim(event.event_id, event.type):
+    claim = await asyncio.to_thread(store.claim, event.event_id, event.type, settings.claim_lease_seconds)
+    if claim == DONE:
         return {"status": "duplicate", "event_id": event.event_id}
+    if claim == IN_PROGRESS:
+        raise HTTPException(status_code=409, detail="in_progress")
 
     try:
         await run_on_bot_loop(bot, handler(event), settings.handler_timeout_seconds)
     except asyncio.TimeoutError:
-        # état Discord inconnu -> on garde la réservation, pas de rejeu
+        # handler annulé mais état Discord incertain -> la réservation expire après le
+        # lease, puis un retry la reprend (effets des handlers idempotents)
         logger.exception("shameless webhook %s (%s) timed out", event.event_id, event.type)
         raise HTTPException(status_code=504, detail="handler timed out")
     except Exception:
-        store.release(event.event_id)
+        await asyncio.to_thread(store.release, event.event_id)
         logger.exception("shameless webhook %s (%s) failed", event.event_id, event.type)
         raise HTTPException(status_code=500, detail="handler failed")
 
-    store.mark_done(event.event_id)
+    await asyncio.to_thread(store.mark_done, event.event_id)
     return {"status": "processed", "event_id": event.event_id}

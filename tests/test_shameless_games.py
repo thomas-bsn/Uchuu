@@ -3,6 +3,9 @@
 Tout passe par le webhook signé de create_internal_api(bot) et le listener vocal
 du cog ; Discord est remplacé par les fakes.
 """
+import asyncio
+from dataclasses import replace
+
 import pytest
 
 from cogs.shameless_games import ShamelessGames
@@ -75,10 +78,16 @@ def guild(fake_bot):
     return guild
 
 
+async def load_games(bot, settings):
+    """Le cog tel que chargé au boot : cog_load enregistre ses handlers sur le dispatcher."""
+    cog = ShamelessGames(bot, settings)
+    await cog.cog_load()
+    return cog
+
+
 @pytest.fixture
-def games(fake_bot, guild, shameless_settings):
-    """Le cog tel que chargé au boot (enregistre ses handlers sur le dispatcher)."""
-    return ShamelessGames(fake_bot, shameless_settings)
+async def games(fake_bot, guild, shameless_settings):
+    return await load_games(fake_bot, shameless_settings)
 
 
 def announce_channel(guild):
@@ -115,11 +124,54 @@ async def test_later_game_starts_do_not_announce_again(guild, games, client, pos
     assert len(announce_channel(guild).sent) == 1
 
 
+async def test_series_first_seen_at_a_later_game_is_still_announced_once(guild, games, client, post_event):
+    # game_started de la Game 1 jamais reçu (bot absent, event perdu côté API...)
+    response = await post_event(client, game_started("g-2", 2))
+    await post_event(client, game_started("g-3", 3))
+
+    assert response.json()["status"] == "processed"
+    sent = announce_channel(guild).sent
+    assert len(sent) == 1
+    assert "Les Chauves" in sent[0]["embed"].title
+
+
+async def test_missing_announce_channel_config_fails_so_the_event_is_retried(
+    guild, fake_bot, make_client, shameless_settings, post_event
+):
+    unconfigured = replace(shameless_settings, announce_channel_id=None)
+    await load_games(fake_bot, unconfigured)
+    event = game_completed("g-1")
+
+    failed = await post_event(await make_client(settings=unconfigured), event)
+
+    assert failed.status_code == 500
+    assert announce_channel(guild).sent == []
+
+    # config corrigée + redémarrage : le retry de Shameless publie le récap
+    rebooted = FakeBot(guilds=[guild])
+    await load_games(rebooted, shameless_settings)
+    retry = await post_event(await make_client(rebooted), event)
+
+    assert retry.json()["status"] == "processed"
+    assert len(announce_channel(guild).sent) == 1
+
+
+async def test_unreachable_announce_channel_fails_so_the_event_is_retried(
+    guild, fake_bot, make_client, shameless_settings, post_event
+):
+    elsewhere = replace(shameless_settings, announce_channel_id=4242)  # salon supprimé / inaccessible
+    await load_games(fake_bot, elsewhere)
+
+    response = await post_event(await make_client(settings=elsewhere), game_started("g-1"))
+
+    assert response.status_code == 500
+
+
 async def test_series_announcement_survives_restart(guild, games, make_client, post_event, shameless_settings):
     await post_event(await make_client(), game_started("g-1", 1))
 
     rebooted = FakeBot(guilds=[guild])
-    ShamelessGames(rebooted, shameless_settings)
+    await load_games(rebooted, shameless_settings)
     await post_event(await make_client(rebooted), game_started("g-1", 1))
 
     assert len(announce_channel(guild).sent) == 1
@@ -212,6 +264,32 @@ async def test_recap_send_failure_lets_shameless_retry(guild, games, client, pos
     assert len(channel.sent) == 1
 
 
+async def test_recap_interrupted_by_timeout_is_posted_exactly_once_on_retry(
+    guild, games, make_client, shameless_settings, post_event
+):
+    channel = announce_channel(guild)
+    original = channel.send
+    hang = {"first": True}
+
+    async def slow_then_ok(*args, **kwargs):
+        if hang.pop("first", False):
+            await asyncio.sleep(10)
+        return await original(*args, **kwargs)
+
+    channel.send = slow_then_ok
+    client = await make_client(settings=replace(shameless_settings, handler_timeout_seconds=0.05, claim_lease_seconds=0.2))
+    event = game_completed("g-1")
+
+    assert (await post_event(client, event)).status_code == 504
+    await asyncio.sleep(0.25)
+    retry = await post_event(client, event)
+    again = await post_event(client, event)
+
+    assert retry.json()["status"] == "processed"
+    assert again.json()["status"] == "duplicate"
+    assert len(channel.sent) == 1
+
+
 # =========================
 # PRÉSENCES VOCALES PAR GAME (Spectateurs, US 24)
 # =========================
@@ -294,7 +372,7 @@ async def test_attendance_survives_a_restart_during_the_game(guild, games, make_
     await join(games, before_restart, guild.get_channel(SHARED))
 
     rebooted = FakeBot(guilds=[guild])
-    rebooted_games = ShamelessGames(rebooted, shameless_settings)
+    rebooted_games = await load_games(rebooted, shameless_settings)
     rebooted_client = await make_client(rebooted)
     await join(rebooted_games, after_restart, guild.get_channel(TEAM2))
     await join(rebooted_games, player_member, guild.get_channel(SHARED))  # exclusion persistée
@@ -311,7 +389,7 @@ async def test_people_in_voice_when_bot_comes_back_are_recorded_for_the_open_gam
     # arrivé pendant que le bot était déconnecté
     guild.add_member(810, voice=guild.get_channel(SHARED))
 
-    rebooted_games = ShamelessGames(FakeBot(guilds=[guild]), shameless_settings)
+    rebooted_games = await load_games(FakeBot(guilds=[guild]), shameless_settings)
     await rebooted_games.on_ready()
 
     assert spectators(shameless_settings, "g-1") == ["810"]

@@ -8,7 +8,8 @@ Seam pour les handlers Discord (#4 teams_formed, #5 game_started / game_complete
     get_dispatcher(bot).register("teams_formed", on_teams_formed)
 
 Les handlers tournent sur bot.runtime_loop (là où discord.py vit), pas sur la boucle uvicorn.
-Ils ne sont exécutés qu'une fois par event_id (dédup SQLite, cf. shameless_store).
+Dédup SQLite par event_id (cf. shameless_store) : jamais rejoués une fois réussis, mais
+ré-exécutés après échec, timeout ou crash -> un handler doit être idempotent.
 """
 from __future__ import annotations
 

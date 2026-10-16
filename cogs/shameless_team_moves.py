@@ -1,6 +1,7 @@
 from discord.ext import commands
 
-from services.shameless_team_moves import register_team_moves, unregister_team_moves
+from services.shameless_events import EVENT_TEAMS_FORMED, get_dispatcher
+from services.shameless_team_moves import make_teams_formed_handler
 from shameless_config import ShamelessSettings
 
 
@@ -12,10 +13,10 @@ class ShamelessTeamMovesCog(commands.Cog):
         self.settings = settings
 
     async def cog_load(self):
-        register_team_moves(self.bot, self.settings)
+        get_dispatcher(self.bot).register(EVENT_TEAMS_FORMED, make_teams_formed_handler(self.bot, self.settings))
 
     async def cog_unload(self):
-        unregister_team_moves(self.bot)
+        get_dispatcher(self.bot).unregister(EVENT_TEAMS_FORMED)
 
 
 async def setup(bot):
