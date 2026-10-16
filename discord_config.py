@@ -11,6 +11,7 @@ EXTENSIONS = [
     "cogs.verification",
     "cogs.confiance_promotion",
     "cogs.shameless_team_moves",
+    "cogs.shameless_games",
 ]
 
 # =========================
