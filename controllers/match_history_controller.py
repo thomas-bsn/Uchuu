@@ -3,9 +3,6 @@ import asyncio
 import io
 import discord
 
-import discord_config as dc
-import runtime_config as rt
-
 router = APIRouter(prefix="/internal/matches", tags=["internal-matches"])
 
 
@@ -13,12 +10,13 @@ router = APIRouter(prefix="/internal/matches", tags=["internal-matches"])
 async def post_match_history_image(
     request: Request,
     image: UploadFile = File(...),
-    channel_id: int | None = Form(default=1453089131512070267),
+    channel_id: int | None = Form(default=None),
     caption: str | None = Form(default=None),
     x_internal_key: str = Header(...),
 ):
+    settings = request.app.state.settings
     # Auth interne
-    if x_internal_key != rt.INTERNAL_API_KEY:
+    if x_internal_key != settings.internal_api.key:
         raise HTTPException(status_code=401, detail="invalid internal key")
 
     # Vérif type fichier (basique)
@@ -30,7 +28,7 @@ async def post_match_history_image(
     if bot_loop is None:
         raise HTTPException(status_code=503, detail="bot not ready yet")
 
-    target_channel_id = channel_id or dc.CHANNEL_LOGS_ID
+    target_channel_id = channel_id or settings.ids.channel_match_history_id
 
     # Lire l’image en mémoire
     image_bytes = await image.read()

@@ -1,21 +1,20 @@
-import discord
-from discord_config import CHANNEL_LOGS_ID
 from datetime import datetime, timezone
 
 class Logger:
-    def __init__(self, bot):
+    def __init__(self, bot, logs_channel_id: int):
         self.bot = bot
-        self.logs_channel = None
-        self.setup()
+        self.logs_channel_id = logs_channel_id
 
-    def setup(self):
-        """Configure le channel de logs"""
-        self.logs_channel = self.bot.get_channel(CHANNEL_LOGS_ID)
+    @property
+    def logs_channel(self):
+        """Résolu à l'appel (pas au chargement, où le cache du bot est encore vide)."""
+        return self.bot.get_channel(self.logs_channel_id)
 
     async def info(self, message: str):
         """Logge une information dans le channel #logs"""
-        if self.logs_channel:
-            await self.logs_channel.send(f"{message}")
+        logs_channel = self.logs_channel
+        if logs_channel:
+            await logs_channel.send(f"{message}")
 
 
     async def log_promotion(self, member, approver_id: int | None, role_promoted: str):
@@ -35,10 +34,13 @@ class Logger:
         )
 
         # Envoi du message dans le canal des logs
-        await self.logs_channel.send(log_message)
+        logs_channel = self.logs_channel
+        if logs_channel:
+            await logs_channel.send(log_message)
 
     
     async def error(self, message: str):
         """Logge une erreur dans le channel #logs"""
-        if self.logs_channel:
-            await self.logs_channel.send(f"❌ [ERROR] {message}")
+        logs_channel = self.logs_channel
+        if logs_channel:
+            await logs_channel.send(f"❌ [ERROR] {message}")

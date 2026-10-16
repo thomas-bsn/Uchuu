@@ -1,14 +1,21 @@
 from datetime import datetime, timezone
 from discord.ext import tasks
 import discord
-from discord_config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, CHANNEL_LOGS_ID, KICK_DM_MESSAGE
+from bot_settings import BotSettings
 from utils.logger import Logger
 
+KICK_DM_MESSAGE = (
+    "Tu as été retiré du serveur.\n"
+    "Raison: validation non obtenue dans le délai imparti.\n"
+    "Serveur privé à intérêt commun."
+)
+
 class VerificationService:
-    def __init__(self, bot):
+    def __init__(self, bot, settings: BotSettings):
         self.bot = bot
+        self.settings = settings
         self.pending_votes = {}
-        self.logger = Logger(bot)
+        self.logger = Logger(bot, settings.ids.channel_logs_id)
         self.check_expired_votes.start()
 
     def add_pending_vote(self, guild_id, target_id, yes, no, message_id, channel_id, expires_at_ts):
@@ -62,7 +69,7 @@ class VerificationService:
         yes_count = len(state["yes"])
 
         # Si le nombre de votes "oui" est suffisant pour approuver
-        if yes_count >= APPROVALS_REQUIRED:
+        if yes_count >= self.settings.votes.approvals_required:
             await self.approve_member(guild, target_id, state["yes"])  # Passer les approvers
             return "✅ Validé"
 
@@ -101,7 +108,7 @@ class VerificationService:
         # Expirer le membre (kick), mais d'abord vérifier si le rôle invité a été supprimé
         member = guild.get_member(user_id)
         if member:
-            invite_role = guild.get_role(ROLE_INVITE_ID)
+            invite_role = guild.get_role(self.settings.ids.role_invite_id)
 
             # Vérifier si le rôle "invité" a été retiré
             if invite_role and invite_role not in member.roles:
@@ -144,13 +151,13 @@ class VerificationService:
         if member is None:
             return
 
-        invite_role = guild.get_role(ROLE_INVITE_ID)
-        membre_role = guild.get_role(ROLE_MEMBRE_ID)
-        logs_channel = guild.get_channel(CHANNEL_LOGS_ID)
+        invite_role = guild.get_role(self.settings.ids.role_invite_id)
+        membre_role = guild.get_role(self.settings.ids.role_membre_id)
+        logs_channel = guild.get_channel(self.settings.ids.channel_logs_id)
 
         if membre_role is None:
             if logs_channel:
-                await logs_channel.send("❌ [verification] ROLE_MEMBRE_ID introuvable.")
+                await logs_channel.send("❌ [verification] Rôle 'Membre' (ROLE_MEMBRE_ID) introuvable.")
             return
 
         # Vérifie si le rôle invité est toujours là

@@ -1,6 +1,6 @@
 # Intégration Shameless — guide opérateur
 
-Une Instance Shameless par déploiement du bot. Toute la config passe par l'env (`SHAMELESS_*`, voir `.env.example`, lue par `shameless_config.ShamelessSettings.from_env()`) ; aucun ID communautaire ni secret n'est commité.
+Une Instance Shameless par déploiement du bot. Toute la config passe par l'env (`SHAMELESS_*`, voir `.env.example`), lue une seule fois au démarrage par `bot_settings.BotSettings.from_env` dans la sous-section `settings.shameless` (config générale du bot : `docs/configuration.md`) ; aucun ID communautaire ni secret n'est commité.
 
 ## Variables d'environnement
 
@@ -157,7 +157,7 @@ cp .env.example .env   # puis remplir, ne jamais commiter
 docker compose up -d --build
 ```
 
-- Le volume nommé `shameless-data` est monté sur `/data` et contient `shameless.sqlite3`.
+- Le volume nommé `shameless-data` est monté sur `/data` et contient `shameless.sqlite3` (et `votes.sqlite3`, voir `docs/configuration.md`).
   **Il doit persister entre redéploiements** : le perdre fait rejouer des événements déjà traités.
   Sauvegarde : `docker compose cp bot:/data/shameless.sqlite3 ./backup.sqlite3`.
 - Le port 9000 n'est publié que sur `127.0.0.1` de l'hôte ; seul le reverse proxy HTTPS l'expose.
