@@ -20,4 +20,4 @@ class ShamelessTeamMovesCog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(ShamelessTeamMovesCog(bot, ShamelessSettings.from_env()))
+    await bot.add_cog(ShamelessTeamMovesCog(bot, bot.settings.shameless))

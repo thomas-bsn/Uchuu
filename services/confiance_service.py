@@ -1,14 +1,15 @@
 from datetime import datetime, timezone
 import discord
 from discord.ext import tasks
-from discord_config import APPROVALS_REQUIRED, ROLE_INVITE_ID, ROLE_MEMBRE_ID, ROLE_CONFIANCE_ID, CHANNEL_LOGS_ID, VOTE_WINDOW_SECONDS
+from bot_settings import BotSettings
 from utils.logger import Logger
 
 class ConfiancePromotionService:
-    def __init__(self, bot):
+    def __init__(self, bot, settings: BotSettings):
         self.bot = bot
+        self.settings = settings
         self.pending_votes = {}  # Dictionnaire pour les votes en attente
-        self.logger = Logger(bot)  # Logger pour enregistrer les événements
+        self.logger = Logger(bot, settings.ids.channel_logs_id)  # Logger pour enregistrer les événements
 
     def add_pending_vote(self, guild_id, target_id, yes, no, message_id, channel_id, expires_at_ts):
         """Ajoute un vote en attente"""
@@ -30,7 +31,7 @@ class ConfiancePromotionService:
         # Parcours des votes en attente
         for (guild_id, target_id), state in list(self.pending_votes.items()):
             expires_at = state["expires_at_ts"]
-            if now >= expires_at + VOTE_WINDOW_SECONDS:  # Si le vote a expiré
+            if now >= expires_at:  # Si le vote a expiré
                 to_remove.append((guild_id, target_id))  # Ajouter à la liste des votes expirés
 
         # Supprimer les votes expirés
@@ -101,12 +102,12 @@ class ConfiancePromotionService:
         yes_count = len(state["yes"])
 
         # Si le nombre de votes "oui" est suffisant pour approuver
-        if yes_count >= APPROVALS_REQUIRED:
+        if yes_count >= self.settings.votes.approvals_required:
             await self.promote_to_confiance(guild, target_id, state["yes"])  # Passer les approvers
             return "✅ Validé"
         
         # Si le vote n'atteint pas le seuil requis
-        if len(state["yes"]) + len(state["no"]) >= APPROVALS_REQUIRED:
+        if len(state["yes"]) + len(state["no"]) >= self.settings.votes.approvals_required:
             return "Le vote est terminé, mais il n'a pas atteint le quota nécessaire."
         
         return "Le vote est en cours, en attente de plus de votes."
@@ -119,9 +120,9 @@ class ConfiancePromotionService:
                 print(f"User {user_id} not found")
                 return
 
-            membre_role = guild.get_role(ROLE_MEMBRE_ID)
-            confiance_role = guild.get_role(ROLE_CONFIANCE_ID)
-            logs_channel = guild.get_channel(CHANNEL_LOGS_ID)
+            membre_role = guild.get_role(self.settings.ids.role_membre_id)
+            confiance_role = guild.get_role(self.settings.ids.role_confiance_id)
+            logs_channel = guild.get_channel(self.settings.ids.channel_logs_id)
 
             if confiance_role is None:
                 if logs_channel:
