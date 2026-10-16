@@ -1,0 +1,12 @@
+.env
+.git
+.claude
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/
+tests/
+pp_members/
+include/traitement_video
+*.zip

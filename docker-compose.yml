@@ -1,0 +1,22 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    # Secrets / IDs fournis par l'environnement de déploiement, jamais dans l'image
+    env_file:
+      - .env
+    environment:
+      INTERNAL_API_HOST: 0.0.0.0
+      INTERNAL_API_PORT: 9000
+      SHAMELESS_DB_PATH: /data/shameless.sqlite3
+      # le reverse proxy joint le conteneur via le bridge Docker
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      # dédup webhooks + présences : DOIT survivre aux redéploiements
+      - shameless-data:/data
+    ports:
+      # exposé uniquement en local, le reverse proxy HTTPS public relaie
+      - "127.0.0.1:9000:9000"
+
+volumes:
+  shameless-data:
