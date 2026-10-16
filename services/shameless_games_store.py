@@ -7,29 +7,27 @@ from __future__ import annotations
 import json
 import time
 
-from services.shameless_store import _Closing, connect
+from services.shameless_store import SqliteStore
+
+# Types de messages publiés (clé = series_id / game_id)
+POST_SERIES_ANNOUNCE = "series_announce"
+POST_GAME_RECAP = "game_recap"
 
 
-class GamePostsStore:
+class GamePostsStore(SqliteStore):
     """Annonce par Série / récap par Game : publiés au plus une fois, même si l'API
     republie avec un autre event_id, et après redémarrage."""
 
-    def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
-        with self._conn() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS shameless_game_posts (
-                    kind      TEXT NOT NULL,  -- 'series_announce' | 'game_recap'
-                    key       TEXT NOT NULL,  -- series_id | game_id
-                    posted_at REAL NOT NULL,
-                    PRIMARY KEY (kind, key)
-                )
-                """
-            )
-
-    def _conn(self):
-        return _Closing(connect(self.db_path))
+    SCHEMA = (
+        """
+        CREATE TABLE IF NOT EXISTS shameless_game_posts (
+            kind      TEXT NOT NULL,  -- POST_SERIES_ANNOUNCE | POST_GAME_RECAP
+            key       TEXT NOT NULL,  -- series_id | game_id
+            posted_at REAL NOT NULL,
+            PRIMARY KEY (kind, key)
+        )
+        """,
+    )
 
     def claim(self, kind: str, key: str) -> bool:
         with self._conn() as conn:
@@ -44,38 +42,30 @@ class GamePostsStore:
             conn.execute("DELETE FROM shameless_game_posts WHERE kind = ? AND key = ?", (kind, key))
 
 
-class GameAttendanceStore:
+class GameAttendanceStore(SqliteStore):
     """Présences vocales par Game : fenêtre ouverte par game_started, fermée par
     game_completed. On stocke les IDs Discord (string) des humains vus dans les salons
     configurés, hors Joueurs de la Game. Lu par le futur vote Spectateurs (Phase 2).
     """
 
-    def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
-        with self._conn() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS shameless_game_windows (
-                    game_id         TEXT PRIMARY KEY,
-                    participant_ids TEXT NOT NULL,  -- JSON : IDs Discord des Joueurs (exclus)
-                    opened_at       REAL NOT NULL,
-                    closed_at       REAL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS shameless_game_attendance (
-                    game_id    TEXT NOT NULL,
-                    discord_id TEXT NOT NULL,
-                    seen_at    REAL NOT NULL,
-                    PRIMARY KEY (game_id, discord_id)
-                )
-                """
-            )
-
-    def _conn(self):
-        return _Closing(connect(self.db_path))
+    SCHEMA = (
+        """
+        CREATE TABLE IF NOT EXISTS shameless_game_windows (
+            game_id         TEXT PRIMARY KEY,
+            participant_ids TEXT NOT NULL,  -- JSON : IDs Discord des Joueurs (exclus)
+            opened_at       REAL NOT NULL,
+            closed_at       REAL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS shameless_game_attendance (
+            game_id    TEXT NOT NULL,
+            discord_id TEXT NOT NULL,
+            seen_at    REAL NOT NULL,
+            PRIMARY KEY (game_id, discord_id)
+        )
+        """,
+    )
 
     def open_window(self, game_id: str, participant_ids: set[str]) -> None:
         # idempotent ; une fenêtre fermée n'est jamais rouverte
