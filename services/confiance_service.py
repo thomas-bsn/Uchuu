@@ -2,14 +2,15 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import tasks
 from bot_settings import BotSettings
-from utils.logger import Logger
+from services.vote_gateway import DiscordVoteGateway
 
 class ConfiancePromotionService:
     def __init__(self, bot, settings: BotSettings):
         self.bot = bot
         self.settings = settings
         self.pending_votes = {}  # Dictionnaire pour les votes en attente
-        self.logger = Logger(bot, settings.ids.channel_logs_id)  # Logger pour enregistrer les événements
+        # Héritage en attente de #11 : seul le log du gateway Vote est réutilisé.
+        self.gateway = DiscordVoteGateway(bot, settings)
 
     def add_pending_vote(self, guild_id, target_id, yes, no, message_id, channel_id, expires_at_ts):
         """Ajoute un vote en attente"""
@@ -40,7 +41,7 @@ class ConfiancePromotionService:
 
     @check_expired_votes.error
     async def check_expired_votes_error(self, exc):
-        await self.logger.error(f"❌ [promotion] check_expired_votes crashed: {exc!r}")
+        await self.gateway.log(f"❌ [promotion] check_expired_votes crashed: {exc!r}")
 
     async def remove_expired_vote(self, guild_id: int, target_id: int):
         """Supprime un vote expiré et le message associé."""
@@ -64,9 +65,9 @@ class ConfiancePromotionService:
                 await message.delete()  # Supprimer le message de vote expiré
 
             # Loggue l'expiration du vote dans le canal des logs
-            await self.logger.info(f"⏱️ [promotion] Vote expiré et supprimé pour {target_id} dans {guild.name}.")
+            await self.gateway.log(f"⏱️ [promotion] Vote expiré et supprimé pour {target_id} dans {guild.name}.")
         except Exception as e:
-            await self.logger.error(f"❌ [promotion] Erreur lors de la suppression du vote expiré : {str(e)}")
+            await self.gateway.log(f"❌ [promotion] Erreur lors de la suppression du vote expiré : {str(e)}")
 
     async def handle_vote(self, guild, target_id, voter_id, vote_yes: bool) -> str:
         """Gère l'enregistrement du vote de promotion et vérifie si le seuil est atteint."""
@@ -137,7 +138,7 @@ class ConfiancePromotionService:
                     
                     # Logguer la promotion dans #logs
                     approvers_mentions = ", ".join(f"<@{uid}>" for uid in approvers_ids) if approvers_ids else "Aucun"
-                    await self.logger.log_promotion(member, approvers_mentions, role_promoted="Confiance")
+                    await self.gateway.log(f"🎉 **Promotion Confiance** — {member.mention} ({member.id}), approuvé par : {approvers_mentions}")
 
                     # Supprimer le vote une fois qu'il est validé
                     key = (guild.id, user_id)
