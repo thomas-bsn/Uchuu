@@ -10,6 +10,8 @@ EXTENSIONS = [
     "commands.profile_pictures",
     "cogs.verification",
     "cogs.confiance_promotion",
+    "cogs.shameless_team_moves",
+    "cogs.shameless_games",
 ]
 
 # =========================
