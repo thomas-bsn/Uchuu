@@ -1,7 +1,6 @@
 import os
 import random
 import discord
-import moviepy.editor as mp
 from discord.ext import commands
 from include.libs.functions import *
 
