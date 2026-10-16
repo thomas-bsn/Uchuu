@@ -2,9 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timezone
 from bot_settings import BotSettings
-from utils.logger import Logger
 from services.confiance_service import ConfiancePromotionService
-from views.vote_view import VoteView
 
 VOTE_PROMOTION_MESSAGE_TEMPLATE = (
     "🔐 **Nouveau vote de promotion**\n\n"
@@ -22,7 +20,6 @@ class ConfiancePromotionCog(commands.Cog):
         self.bot = bot
         self.settings = settings
         self.service = ConfiancePromotionService(bot, settings)
-        self.logger = Logger(bot, settings.ids.channel_logs_id)
 
     async def cog_load(self):
         self.service.check_expired_votes.start()
@@ -79,7 +76,6 @@ class ConfiancePromotionCog(commands.Cog):
 
         # Créer le message de vote
         expires_at_ts = int(datetime.now(timezone.utc).timestamp()) + self.settings.votes.confiance_window_seconds
-        view = VoteView(self.service, target_id=member.id, role_confiance_id=self.settings.ids.role_confiance_id)  # Utilisation de la même vue pour gérer le vote
 
         # Passer la variable de la mention du rôle Confiance dans le template
         content = VOTE_PROMOTION_MESSAGE_TEMPLATE.format(
@@ -91,7 +87,7 @@ class ConfiancePromotionCog(commands.Cog):
         )
 
         try:
-            msg = await validation_channel.send(content, view=view)
+            msg = await validation_channel.send(content)  # sans bouton : remplacé par le module Vote (#11)
             # Ajouter le vote en attente
             self.service.add_pending_vote(
                 guild.id,
@@ -104,7 +100,7 @@ class ConfiancePromotionCog(commands.Cog):
             )
 
         except Exception as e:
-            await self.logger.error(f"Erreur lors de la création du vote pour {member.mention}: {str(e)}")
+            await self.service.gateway.log(f"❌ Erreur lors de la création du vote pour {member.mention}: {str(e)}")
 
 
     @commands.Cog.listener()
