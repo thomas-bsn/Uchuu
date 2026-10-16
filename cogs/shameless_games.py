@@ -4,32 +4,22 @@ Handlers branchés sur le dispatcher webhook de #2 (game_started / game_complete
 Présences (US 24) : entre game_started et game_completed d'une Game, on note les humains
 vus dans les salons vocaux commun / Team 1 / Team 2, hors Joueurs de la Game. Tout est
 dans SQLite -> un redémarrage en pleine Game reprend la fenêtre ouverte.
+SQLite est appelé via asyncio.to_thread : jamais d'I/O bloquante sur la boucle du bot.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any
 
 from discord.ext import commands
 
 from services.shameless_events import EVENT_GAME_COMPLETED, EVENT_GAME_STARTED, ShamelessEvent, get_dispatcher
-from services.shameless_games_store import GameAttendanceStore, GamePostsStore
-from services.shameless_recap import game_recap, series_announcement, teams_of
+from services.shameless_games_store import POST_GAME_RECAP, POST_SERIES_ANNOUNCE, GameAttendanceStore, GamePostsStore
+from services.shameless_payloads import participant_discord_ids
+from services.shameless_recap import game_recap, series_announcement
 from shameless_config import ShamelessSettings
 
 logger = logging.getLogger(__name__)
-
-
-def participant_ids(data: dict[str, Any]) -> set[str]:
-    """IDs Discord des Joueurs liés de la Game (contrat API), sinon déduits des Teams."""
-    ids = data.get("participant_discord_ids")
-    if not isinstance(ids, list):
-        ids = [
-            p.get("discord_id")
-            for team in teams_of(data).values()
-            for p in team.get("players") or [] if isinstance(p, dict)
-        ]
-    return {str(i) for i in ids if i}
 
 
 class ShamelessGames(commands.Cog):
@@ -38,7 +28,9 @@ class ShamelessGames(commands.Cog):
         self.settings = settings
         self.posts = GamePostsStore(settings.db_path)
         self.attendance = GameAttendanceStore(settings.db_path)
-        dispatcher = get_dispatcher(bot)
+
+    async def cog_load(self):
+        dispatcher = get_dispatcher(self.bot)
         dispatcher.register(EVENT_GAME_STARTED, self.on_game_started)
         dispatcher.register(EVENT_GAME_COMPLETED, self.on_game_completed)
 
@@ -56,28 +48,27 @@ class ShamelessGames(commands.Cog):
         game_id = data.get("game_id")
         if game_id:
             # présences d'abord : idempotent, et indépendant d'un échec d'annonce
-            participants = participant_ids(data)
-            self.attendance.open_window(str(game_id), participants)
-            self._snapshot({str(game_id): participants})
+            participants = participant_discord_ids(data)
+            await asyncio.to_thread(self.attendance.open_window, str(game_id), participants)
+            await self._snapshot({str(game_id): participants})
 
-        # annonce seulement au lancement de la 1re Game (numéro absent = on suppose la 1re)
-        if data.get("game_number") not in (None, 1):
-            return
+        # annonce au premier game_started vu pour la Série (dédup par series_id), même si
+        # celui de la Game 1 a été raté
         key = str(data.get("series_id") or game_id or event.event_id)
-        await self._post_once("series_announce", key, lambda: series_announcement(data, self.settings.web_url))
+        await self._post_once(POST_SERIES_ANNOUNCE, key, lambda: series_announcement(data, self.settings.web_url))
 
     async def on_game_completed(self, event: ShamelessEvent) -> None:
         data = event.data
         game_id = data.get("game_id")
         if game_id:
-            open_windows = self.attendance.open_windows()
+            open_windows = await asyncio.to_thread(self.attendance.open_windows)
             if str(game_id) in open_windows:
                 # dernier relevé : présents à la fin
-                self._snapshot({str(game_id): open_windows[str(game_id)]})
-            self.attendance.close_window(str(game_id), participant_ids(data))
+                await self._snapshot({str(game_id): open_windows[str(game_id)]})
+            await asyncio.to_thread(self.attendance.close_window, str(game_id), participant_discord_ids(data))
 
         key = str(game_id or event.event_id)
-        await self._post_once("game_recap", key, lambda: game_recap(data, self.settings.web_url))
+        await self._post_once(POST_GAME_RECAP, key, lambda: game_recap(data, self.settings.web_url))
 
     # =========================
     # VOICE (présences)
@@ -86,9 +77,14 @@ class ShamelessGames(commands.Cog):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         channel = getattr(after, "channel", None)
-        if member.bot or channel is None or channel.id not in self._voice_ids():
+        # mute / deafen / stream : même salon -> rien à noter
+        if channel is None or channel == getattr(before, "channel", None):
             return
-        discord_id = str(member.id)
+        if member.bot or channel.id not in self._voice_ids():
+            return
+        await asyncio.to_thread(self._record_everywhere, str(member.id))
+
+    def _record_everywhere(self, discord_id: str) -> None:
         for game_id, participants in self.attendance.open_windows().items():
             if discord_id not in participants:
                 self.attendance.record(game_id, {discord_id})
@@ -96,9 +92,9 @@ class ShamelessGames(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         # (re)connexion : rattrape ceux arrivés pendant que le bot était absent
-        open_windows = self.attendance.open_windows()
+        open_windows = await asyncio.to_thread(self.attendance.open_windows)
         if open_windows:
-            self._snapshot(open_windows)
+            await self._snapshot(open_windows)
 
     # =========================
     # HELPERS
@@ -108,7 +104,7 @@ class ShamelessGames(commands.Cog):
         s = self.settings
         return {i for i in (s.shared_voice_id, s.team1_voice_id, s.team2_voice_id) if i is not None}
 
-    def _snapshot(self, windows: dict[str, set[str]]) -> None:
+    async def _snapshot(self, windows: dict[str, set[str]]) -> None:
         """Note les humains actuellement dans les salons configurés pour ces Games."""
         present = set()
         for channel_id in self._voice_ids():
@@ -116,25 +112,31 @@ class ShamelessGames(commands.Cog):
             if channel is None:
                 continue
             present |= {str(m.id) for m in channel.members if not m.bot}
-        for game_id, participants in windows.items():
-            self.attendance.record(game_id, present - participants)
+
+        def _record():
+            for game_id, participants in windows.items():
+                self.attendance.record(game_id, present - participants)
+
+        await asyncio.to_thread(_record)
 
     async def _post_once(self, kind: str, key: str, build_embed) -> None:
+        # salon résolu AVANT la réservation : absent / inaccessible -> exception, l'event
+        # n'est pas marqué traité et Shameless retente
         channel = await self._announce_channel()
-        if channel is None or not self.posts.claim(kind, key):
+        if not await asyncio.to_thread(self.posts.claim, kind, key):
             return
         try:
             await channel.send(embed=build_embed())
-        except Exception:
-            # pas publié -> on libère pour que le retry Shameless republie
-            self.posts.release(kind, key)
+        except BaseException:
+            # pas publié (erreur ou timeout du handler) -> on libère pour que le retry republie.
+            # shield : la libération va au bout même si on est annulé.
+            await asyncio.shield(asyncio.to_thread(self.posts.release, kind, key))
             raise
 
     async def _announce_channel(self):
         channel_id = self.settings.announce_channel_id
         if channel_id is None:
-            logger.warning("SHAMELESS_ANNOUNCE_CHANNEL_ID absent : annonce/récap ignorés")
-            return None
+            raise RuntimeError("SHAMELESS_ANNOUNCE_CHANNEL_ID absent : annonce/récap impossibles")
         # pas dans le cache -> fetch ; s'il lève, le webhook répond 500 et Shameless retente
         return self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
 

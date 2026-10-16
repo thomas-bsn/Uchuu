@@ -163,3 +163,83 @@ async def test_webhook_is_unavailable_when_no_secret_is_configured(make_client, 
     response = await post_event(client, make_event("teams_formed"))
 
     assert response.status_code == 503
+
+
+# =========================
+# RÉSERVATIONS EN COURS (lease)
+# =========================
+
+async def test_redelivery_while_first_delivery_is_still_running_is_not_acknowledged(fake_bot, client, post_event):
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def slow(event):
+        calls.append(event.event_id)
+        started.set()
+        await release.wait()
+
+    get_dispatcher(fake_bot).register("teams_formed", slow)
+    event = make_event("teams_formed")
+
+    first = asyncio.create_task(post_event(client, event))
+    await started.wait()
+    concurrent = await post_event(client, event)
+    release.set()
+    first = await first
+
+    # non-2xx : Shameless doit retenter, l'event n'est pas encore livré
+    assert concurrent.status_code == 409
+    assert concurrent.json()["detail"] == "in_progress"
+    assert first.json()["status"] == "processed"
+    assert len(calls) == 1
+    # une fois terminé, c'est bien un doublon
+    assert (await post_event(client, event)).json()["status"] == "duplicate"
+
+
+async def test_timed_out_delivery_is_retried_once_its_claim_lease_expires(
+    fake_bot, make_client, shameless_settings, post_event
+):
+    settings = replace(shameless_settings, handler_timeout_seconds=0.05, claim_lease_seconds=0.2)
+    attempts = []
+
+    async def hangs_first_time(event):
+        attempts.append(event.event_id)
+        if len(attempts) == 1:
+            await asyncio.sleep(10)
+
+    get_dispatcher(fake_bot).register("game_started", hangs_first_time)
+    client = await make_client(settings=settings)
+    event = make_event("game_started")
+
+    timed_out = await post_event(client, event)
+    too_early = await post_event(client, event)
+    await asyncio.sleep(0.25)
+    retried = await post_event(client, event)
+
+    assert timed_out.status_code == 504
+    assert too_early.status_code == 409
+    assert retried.json()["status"] == "processed"
+    assert len(attempts) == 2
+
+
+async def test_claim_left_by_a_crash_is_retried_after_restart_once_lease_expires(
+    make_client, shameless_settings, post_event
+):
+    settings = replace(shameless_settings, handler_timeout_seconds=0.05, claim_lease_seconds=0.2)
+    event = make_event("game_completed", {"game_id": "g-1"})
+
+    crashed = FakeBot()
+
+    async def never_finishes(event):
+        await asyncio.sleep(10)
+
+    get_dispatcher(crashed).register("game_completed", never_finishes)
+    await post_event(await make_client(crashed, settings), event)
+
+    await asyncio.sleep(0.25)
+    rebooted = FakeBot()
+    calls = record_calls(rebooted, "game_completed")
+    response = await post_event(await make_client(rebooted, settings), event)
+
+    assert response.json()["status"] == "processed"
+    assert len(calls) == 1
