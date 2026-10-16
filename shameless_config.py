@@ -26,6 +26,9 @@ class ShamelessSettings:
     webhook_tolerance_seconds: int = 300
     # Délai max d'exécution d'un handler sur la boucle du bot
     handler_timeout_seconds: float = 30.0
+    # Durée d'une réservation "processing" : passé ce délai (crash / timeout), un retry
+    # la reprend. Doit rester > handler_timeout_seconds.
+    claim_lease_seconds: float = 120.0
 
     # Clé des requêtes authentifiées API -> bot (voice candidates)
     bot_api_key: str | None = None
@@ -44,6 +47,7 @@ class ShamelessSettings:
             db_path=os.getenv("SHAMELESS_DB_PATH", cls.db_path),
             webhook_tolerance_seconds=int(os.getenv("SHAMELESS_WEBHOOK_TOLERANCE_SECONDS", cls.webhook_tolerance_seconds)),
             handler_timeout_seconds=float(os.getenv("SHAMELESS_HANDLER_TIMEOUT_SECONDS", cls.handler_timeout_seconds)),
+            claim_lease_seconds=float(os.getenv("SHAMELESS_CLAIM_LEASE_SECONDS", cls.claim_lease_seconds)),
             bot_api_key=os.getenv("SHAMELESS_BOT_API_KEY") or None,
             guild_id=_int_or_none("SHAMELESS_GUILD_ID"),
             shared_voice_id=_int_or_none("SHAMELESS_SHARED_VOICE_ID"),
