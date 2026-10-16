@@ -1,5 +1,5 @@
-"""Cog fin du module Vote : arrivée d'un membre → vote Invité, expiration périodique,
-bouton ✅ persistant réenregistré au démarrage."""
+"""Cog fin du module Vote : arrivée d'un membre → vote Invité, scan périodique des
+candidats Confiance, expiration périodique, bouton ✅ persistant réenregistré au démarrage."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,7 @@ from discord.ext import commands, tasks
 from bot_settings import BotSettings
 from services.vote import Votes
 from services.vote_gateway import DiscordVoteGateway
-from services.vote_policies import InvitePolicy
+from services.vote_policies import ConfiancePolicy, InvitePolicy
 from services.vote_store import VoteStore
 from views.vote_button import VOTES_COG, VoteButton
 
@@ -23,7 +23,7 @@ def build_votes(bot, settings: BotSettings) -> Votes:
     return Votes(
         VoteStore(settings.votes.db_path),
         DiscordVoteGateway(bot, settings),
-        [InvitePolicy(settings.ids, settings.votes)],
+        [InvitePolicy(settings.ids, settings.votes), ConfiancePolicy(settings.ids, settings.votes)],
         approvals_required=settings.votes.approvals_required,
         voter_role_id=settings.ids.role_confiance_id,
     )
@@ -34,12 +34,15 @@ class VotesCog(commands.Cog, name=VOTES_COG):
         self.bot = bot
         self.settings = settings
         self.votes = build_votes(bot, settings)
+        self.scan_confiance.change_interval(hours=settings.votes.confiance_scan_interval_hours)
 
     async def cog_load(self):
         self.expire_due_votes.start()
+        self.scan_confiance.start()
 
     async def cog_unload(self):
         self.expire_due_votes.cancel()
+        self.scan_confiance.cancel()
 
     @tasks.loop(seconds=EXPIRY_CHECK_SECONDS)
     async def expire_due_votes(self):
@@ -48,7 +51,15 @@ class VotesCog(commands.Cog, name=VOTES_COG):
         except Exception:
             log.exception("expiration des votes en échec")
 
+    @tasks.loop(hours=24)  # intervalle réel : CONFIANCE_SCAN_INTERVAL_HOURS
+    async def scan_confiance(self):
+        try:
+            await self.votes.scan("confiance")
+        except Exception:
+            log.exception("scan des candidats Confiance en échec")
+
     @expire_due_votes.before_loop
+    @scan_confiance.before_loop
     async def _wait_ready(self):
         await self.bot.wait_until_ready()
 

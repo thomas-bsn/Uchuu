@@ -29,7 +29,7 @@ class FakeVoteMessage:
 
 @dataclass
 class FakeVoteGateway:
-    members: dict[int, MemberInfo] = field(default_factory=dict)
+    roster: dict[int, MemberInfo] = field(default_factory=dict)
     messages: dict[int, FakeVoteMessage] = field(default_factory=dict)
     dms: list[tuple[int, str]] = field(default_factory=list)
     kicked: list[int] = field(default_factory=list)
@@ -39,30 +39,33 @@ class FakeVoteGateway:
 
     # --- monde ---
     def add_member(self, member_id: int, *roles: int, bot: bool = False, joined_at: float | None = None) -> None:
-        self.members[member_id] = MemberInfo(member_id, frozenset(roles), bot=bot, joined_at=joined_at)
+        self.roster[member_id] = MemberInfo(member_id, frozenset(roles), bot=bot, joined_at=joined_at)
 
     def roles_of(self, member_id: int) -> set[int]:
-        return set(self.members[member_id].role_ids)
+        return set(self.roster[member_id].role_ids)
 
     def live_messages(self) -> list[FakeVoteMessage]:
         return [m for m in self.messages.values() if not m.deleted]
 
     def _set_roles(self, member_id: int, roles) -> None:
-        info = self.members[member_id]
-        self.members[member_id] = MemberInfo(member_id, frozenset(roles), bot=info.bot, joined_at=info.joined_at)
+        info = self.roster[member_id]
+        self.roster[member_id] = MemberInfo(member_id, frozenset(roles), bot=info.bot, joined_at=info.joined_at)
 
     # --- VoteGateway ---
     async def member(self, member_id: int) -> MemberInfo | None:
-        return self.members.get(member_id)
+        return self.roster.get(member_id)
+
+    async def members(self) -> list[MemberInfo]:
+        return list(self.roster.values())
 
     async def add_role(self, member_id: int, role_id: int, reason: str) -> bool:
-        if member_id not in self.members:
+        if member_id not in self.roster:
             return False
         self._set_roles(member_id, self.roles_of(member_id) | {role_id})
         return True
 
     async def remove_role(self, member_id: int, role_id: int, reason: str) -> bool:
-        if member_id not in self.members:
+        if member_id not in self.roster:
             return False
         self._set_roles(member_id, self.roles_of(member_id) - {role_id})
         return True
@@ -72,7 +75,7 @@ class FakeVoteGateway:
         return True
 
     async def kick(self, member_id: int, reason: str) -> bool:
-        if self.members.pop(member_id, None) is None:
+        if self.roster.pop(member_id, None) is None:
             return False
         self.kicked.append(member_id)
         return True

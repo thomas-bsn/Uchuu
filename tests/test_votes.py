@@ -170,7 +170,7 @@ async def test_expiry_does_not_kick_an_invite_whose_role_was_removed_manually(vo
 
 async def test_expiry_of_an_invite_who_already_left_only_closes_the_vote(votes, gateway, clock):
     vote = await votes.open("invite", NEWCOMER)
-    del gateway.members[NEWCOMER]
+    del gateway.roster[NEWCOMER]
 
     clock.advance(DAY)
     await votes.expire_due()
