@@ -21,10 +21,10 @@ from typing import Any
 @dataclass(eq=False)
 class FakeMember:
     id: int
-    name: str = "member"
     bot: bool = False
+    name: str = "member"
     voice_channel: "FakeVoiceChannel | None" = None
-    moves: list[int] = field(default_factory=list)  # ids des salons cibles, dans l'ordre
+    moves: list[int | None] = field(default_factory=list)  # ids des salons cibles, dans l'ordre
 
     @property
     def voice(self):
@@ -49,9 +49,14 @@ class FakeVoiceState:
 @dataclass(eq=False)
 class FakeVoiceChannel:
     id: int
-    name: str = "voice"
-    position: int = 0
     members: list[FakeMember] = field(default_factory=list)
+    position: int = 0
+    name: str = "voice"
+
+    def __post_init__(self):
+        self.members = list(self.members)
+        for member in self.members:
+            member.voice_channel = self
 
 
 @dataclass(eq=False)
@@ -77,14 +82,19 @@ class FakeGuild:
     id: int
     voice_channels: list[FakeVoiceChannel] = field(default_factory=list)
     text_channels: list[FakeTextChannel] = field(default_factory=list)
-    members: list[FakeMember] = field(default_factory=list)
+    extra_members: list[FakeMember] = field(default_factory=list)  # membres hors vocal
 
-    def add_voice_channel(self, channel_id: int, name: str = "voice", position: int | None = None) -> FakeVoiceChannel:
-        channel = FakeVoiceChannel(
-            id=channel_id,
-            name=name,
-            position=len(self.voice_channels) if position is None else position,
-        )
+    def __post_init__(self):
+        self.voice_channels = list(self.voice_channels)
+        self.text_channels = list(self.text_channels)
+
+    @property
+    def members(self) -> list[FakeMember]:
+        in_voice = [m for c in self.voice_channels for m in c.members]
+        return in_voice + [m for m in self.extra_members if m not in in_voice]
+
+    def add_voice_channel(self, channel_id: int, members=(), name: str = "voice") -> FakeVoiceChannel:
+        channel = FakeVoiceChannel(channel_id, list(members), position=len(self.voice_channels), name=name)
         self.voice_channels.append(channel)
         return channel
 
@@ -93,12 +103,13 @@ class FakeGuild:
         self.text_channels.append(channel)
         return channel
 
-    def add_member(self, member_id: int, *, bot: bool = False, voice: FakeVoiceChannel | None = None, name: str | None = None) -> FakeMember:
-        member = FakeMember(id=member_id, name=name or f"member-{member_id}", bot=bot)
-        self.members.append(member)
+    def add_member(self, member_id: int, *, bot: bool = False, voice: FakeVoiceChannel | None = None) -> FakeMember:
+        member = FakeMember(member_id, bot=bot, name=f"member-{member_id}")
         if voice is not None:
             member.voice_channel = voice
             voice.members.append(member)
+        else:
+            self.extra_members.append(member)
         return member
 
     def get_member(self, member_id: int) -> FakeMember | None:
@@ -109,15 +120,15 @@ class FakeGuild:
 
 
 class FakeBot:
-    """Ce que les handlers voient du bot : get_guild / get_channel + runtime_loop."""
+    """Ce que les handlers / routes voient du bot : get_guild / get_channel + runtime_loop."""
 
-    def __init__(self, runtime_loop=None):
+    def __init__(self, guilds=(), runtime_loop=None):
+        self.guilds: list[FakeGuild] = list(guilds)
         self.runtime_loop = runtime_loop
         self.loop = runtime_loop
-        self.guilds: list[FakeGuild] = []
 
     def add_guild(self, guild_id: int) -> FakeGuild:
-        guild = FakeGuild(id=guild_id)
+        guild = FakeGuild(guild_id)
         self.guilds.append(guild)
         return guild
 
@@ -145,6 +156,7 @@ class FakeBot:
 WEBHOOK_SECRET = "test-webhook-secret"
 WEBHOOK_PATH = "/internal/shameless/webhook"
 
+
 def make_event(event_type: str, data: dict[str, Any] | None = None, *, event_id: str | None = None, version: int = 1) -> dict[str, Any]:
     """Enveloppe versionnée telle que Shameless l'envoie."""
     return {
@@ -156,7 +168,7 @@ def make_event(event_type: str, data: dict[str, Any] | None = None, *, event_id:
     }
 
 
-def sign_webhook(body: bytes, secret: str, *, timestamp: int | None = None) -> dict[str, str]:
+def sign_webhook(body: bytes, secret: str = WEBHOOK_SECRET, *, timestamp: int | None = None) -> dict[str, str]:
     """Headers de signature : HMAC-SHA256(secret, f"{timestamp}.{body}")."""
     ts = str(int(time.time()) if timestamp is None else timestamp)
     digest = hmac.new(secret.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
