@@ -9,7 +9,7 @@ import asyncio
 import time
 from typing import Callable, Iterable, Protocol
 
-from services.vote_gateway import VoteGateway
+from services.vote_gateway import MemberInfo, VoteGateway
 from services.vote_store import APPROVED, CANCELLED, EXPIRED, OPEN, VoteRecord, VoteStore
 
 REPLY_CLOSED = "Ce vote est terminé."
@@ -40,6 +40,15 @@ class VotePolicy(Protocol):
 
     async def on_expired(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         """Effets d'une expiration sans quorum (= refus) ; renvoie le log à publier."""
+
+
+class ScannedPolicy(VotePolicy, Protocol):
+    """Politique dont les cibles sont proposées par un scan périodique (`Votes.scan`)."""
+
+    cooldown_seconds: int  # délai après un vote expiré avant de reproposer la cible
+
+    def is_candidate(self, member: MemberInfo, now: float) -> bool:
+        """Le membre peut-il être proposé (rôles, ancienneté) ?"""
 
 
 class Votes:
@@ -81,6 +90,26 @@ class Votes:
             return None
         await asyncio.to_thread(self.store.set_message, vote_id, ref)
         return await asyncio.to_thread(self.store.get, vote_id)
+
+    async def scan(self, kind: str) -> list[VoteRecord]:
+        """Ouvre un vote pour chaque candidat d'une `ScannedPolicy` : jamais deux votes
+        ouverts pour une cible, ni avant la fin du cooldown après un vote expiré.
+        Renvoie les seuls votes nouvellement ouverts."""
+        policy = self.policies[kind]
+        now = self.clock()
+        opened = []
+        for member in await self.gateway.members():
+            if not policy.is_candidate(member, now):
+                continue
+            if await asyncio.to_thread(self.store.find_open, kind, member.id) is not None:
+                continue  # déjà en vote : rien de reposté
+            last_expired = await asyncio.to_thread(self.store.last_closed_at, kind, member.id, EXPIRED)
+            if last_expired is not None and now < last_expired + policy.cooldown_seconds:
+                continue
+            vote = await self.open(kind, member.id)
+            if vote is not None:
+                opened.append(vote)
+        return opened
 
     async def approve(self, vote_id: int, voter_id: int) -> str:
         """Bulletin ✅ d'un votant ; renvoie la réponse éphémère à lui afficher."""

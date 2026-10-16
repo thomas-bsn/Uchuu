@@ -85,6 +85,15 @@ class VoteStore(SqliteStore):
             ).fetchone()
             return self._record(conn, row) if row else None
 
+    def last_closed_at(self, kind: str, target_id: int, status: str) -> float | None:
+        """Date de la dernière clôture de ce statut pour la cible (None si jamais)."""
+        with self._conn() as conn:
+            (closed_at,) = conn.execute(
+                "SELECT MAX(closed_at) FROM votes WHERE kind = ? AND target_id = ? AND status = ?",
+                (kind, target_id, status),
+            ).fetchone()
+            return closed_at
+
     def due(self, now: float) -> list[VoteRecord]:
         with self._conn() as conn:
             rows = conn.execute(
