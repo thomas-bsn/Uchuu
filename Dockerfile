@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     INTERNAL_API_HOST=0.0.0.0 \
     INTERNAL_API_PORT=9000 \
-    SHAMELESS_DB_PATH=/data/shameless.sqlite3
+    SHAMELESS_DB_PATH=/data/shameless.sqlite3 \
+    VOTES_DB_PATH=/data/votes.sqlite3
 
 WORKDIR /app
 
