@@ -31,8 +31,15 @@ class MessageRef:
     message_id: int
 
 
+def _member_info(member) -> MemberInfo:
+    joined = member.joined_at.timestamp() if member.joined_at else None
+    return MemberInfo(member.id, frozenset(r.id for r in member.roles), bot=member.bot, joined_at=joined)
+
+
 class VoteGateway(Protocol):
     async def member(self, member_id: int) -> MemberInfo | None: ...
+    async def members(self) -> list[MemberInfo]:
+        """Tous les membres du serveur (vide si le serveur est introuvable)."""
     async def add_role(self, member_id: int, role_id: int, reason: str) -> bool: ...
     async def remove_role(self, member_id: int, role_id: int, reason: str) -> bool: ...
     async def send_dm(self, member_id: int, content: str) -> bool: ...
@@ -82,8 +89,11 @@ class DiscordVoteGateway:
         _, member = await self._member(member_id)
         if member is None:
             return None
-        joined = member.joined_at.timestamp() if member.joined_at else None
-        return MemberInfo(member.id, frozenset(r.id for r in member.roles), bot=member.bot, joined_at=joined)
+        return _member_info(member)
+
+    async def members(self) -> list[MemberInfo]:
+        guild = await self._guild()
+        return [] if guild is None else [_member_info(member) for member in guild.members]
 
     async def add_role(self, member_id: int, role_id: int, reason: str) -> bool:
         return await self._change_role(member_id, role_id, reason, add=True)
