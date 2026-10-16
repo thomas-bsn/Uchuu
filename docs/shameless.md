@@ -76,6 +76,25 @@ Réponses :
 L'`event_id` est persisté dans SQLite **avant** l'exécution du handler et l'accusé de réception :
 le choix est « au plus une fois » pour les effets Discord (pas de double move / annonce / récap).
 
+## Moves d'équipe (`teams_formed`)
+
+Shameless envoie `teams_formed` quand le Picker valide les Teams et la Série, avant la Draft de champions. Snapshot attendu dans `data` :
+
+```json
+{
+  "series_id": "s-1",
+  "team_a": { "name": "...", "players": [{ "discord_id": "111111111111111111" }, { "discord_id": null }] },
+  "team_b": { "name": "...", "players": [{ "discord_id": "222222222222222222" }] }
+}
+```
+
+- Team A va dans `SHAMELESS_TEAM1_VOICE_ID`, Team B dans `SHAMELESS_TEAM2_VOICE_ID`, pour toute la Série et quel que soit le côté bleu/rouge.
+- Sont déplacés uniquement les Joueurs dont le `discord_id` est fourni (string, snowflake) et qui sont connectés à un vocal du serveur. Les Joueurs sans lien Discord, les membres hors vocal et les Spectateurs ne bougent pas.
+- Un membre déjà dans son vocal d'équipe n'est pas redéplacé. Si un move échoue (permissions, membre parti), l'erreur est loguée et les autres moves continuent.
+- Si le serveur ou un vocal d'équipe est introuvable, le bot ne déplace personne et répond `500` : Shameless retente avec le même `event_id`.
+- Un seul move par Série : `game_started` / `game_completed` ne déplacent personne. Les joueurs reviennent au vocal commun entre les Games et rejoignent leur vocal d'équipe quand ils veulent.
+- Permission Discord requise : **Move Members** (Déplacer des membres) sur les salons commun, Team 1 et Team 2.
+
 ## Annonces, récaps et présences par Game (`game_started` / `game_completed`)
 
 Cog `cogs.shameless_games`. Messages publiés dans `SHAMELESS_ANNOUNCE_CHANNEL_ID` (si absent : rien n'est publié, l'event est acquitté).
