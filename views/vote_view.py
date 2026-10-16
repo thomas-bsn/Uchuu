@@ -1,12 +1,11 @@
 import discord
-from discord.ui import View, Button
-from discord_config import ROLE_CONFIANCE_ID
 
 class VoteView(discord.ui.View):
-    def __init__(self, service, target_id: int):
+    def __init__(self, service, target_id: int, role_confiance_id: int):
         super().__init__(timeout=None)
         self.service = service
         self.target_id = target_id
+        self.role_confiance_id = role_confiance_id
 
     @discord.ui.button(label="✅", style=discord.ButtonStyle.success)
     async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -19,7 +18,7 @@ class VoteView(discord.ui.View):
         if guild is None:
             return await interaction.response.send_message("Serveur non supporté.", ephemeral=True)
 
-        confiance_role = guild.get_role(ROLE_CONFIANCE_ID)  # Mentionner le rôle Confiance
+        confiance_role = guild.get_role(self.role_confiance_id)  # Mentionner le rôle Confiance
         if confiance_role is None:
             return await interaction.response.send_message("Rôle 'Confiance' non trouvé.", ephemeral=True)
 
