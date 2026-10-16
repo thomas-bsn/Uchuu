@@ -9,3 +9,4 @@ data/
 .venv/
 .pytest_cache/
 .env
+*.py[cod]
