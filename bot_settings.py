@@ -39,12 +39,7 @@ class DiscordSettings:
 class CommunityIds:
     """IDs Discord du serveur communautaire (jamais dans le code)."""
 
-    guild_id: int
-    role_invite_id: int
-    role_membre_id: int
-    role_confiance_id: int
-    channel_validation_id: int
-    channel_logs_id: int
+    # Salon par défaut des images d'historique de match (POST /internal/matches/history-image)
     channel_match_history_id: int
 
 
@@ -56,29 +51,15 @@ class InternalApiSettings:
 
 
 @dataclass(frozen=True)
-class VoteSettings:
-    invite_window_seconds: int = 24 * 3600
-    confiance_window_seconds: int = 24 * 3600
-    approvals_required: int = 1
-    confiance_eligibility_days: int = 30
-    confiance_cooldown_days: int = 30
-    confiance_scan_interval_hours: int = 24
-    # Fichier SQLite dédié, sur le volume persistant (distinct de la base Shameless)
-    db_path: str = "/data/votes.sqlite3"
-
-
-@dataclass(frozen=True)
 class BotSettings:
     discord: DiscordSettings
     ids: CommunityIds
     internal_api: InternalApiSettings
-    votes: VoteSettings
     shameless: ShamelessSettings
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "BotSettings":
         env = _EnvReader(environ)
-        logs_channel = env.required_int("CHANNEL_LOGS_ID")
         settings = cls(
             discord=DiscordSettings(
                 token=env.required_str("DISCORD_TOKEN"),
@@ -86,29 +67,15 @@ class BotSettings:
                 status=env.str("BOT_STATUS", DiscordSettings.status),
             ),
             ids=CommunityIds(
-                guild_id=env.required_int("GUILD_ID"),
-                role_invite_id=env.required_int("ROLE_INVITE_ID"),
-                role_membre_id=env.required_int("ROLE_MEMBRE_ID"),
-                role_confiance_id=env.required_int("ROLE_CONFIANCE_ID"),
-                channel_validation_id=env.required_int("CHANNEL_VALIDATION_ID"),
-                channel_logs_id=logs_channel,
-                channel_match_history_id=env.int("CHANNEL_MATCH_HISTORY_ID", logs_channel),
+                # CHANNEL_LOGS_ID : ancien nom, accepté en repli pour les .env existants
+                channel_match_history_id=env.required_int(
+                    "CHANNEL_MATCH_HISTORY_ID", fallback="CHANNEL_LOGS_ID"
+                ),
             ),
             internal_api=InternalApiSettings(
                 key=env.required_str("INTERNAL_API_KEY"),
                 host=env.str("INTERNAL_API_HOST", InternalApiSettings.host),
                 port=env.int("INTERNAL_API_PORT", InternalApiSettings.port),
-            ),
-            votes=VoteSettings(
-                invite_window_seconds=env.int("INVITE_VOTE_WINDOW_SECONDS", VoteSettings.invite_window_seconds),
-                confiance_window_seconds=env.int("CONFIANCE_VOTE_WINDOW_SECONDS", VoteSettings.confiance_window_seconds),
-                approvals_required=env.int("VOTE_APPROVALS_REQUIRED", VoteSettings.approvals_required),
-                confiance_eligibility_days=env.int("CONFIANCE_ELIGIBILITY_DAYS", VoteSettings.confiance_eligibility_days),
-                confiance_cooldown_days=env.int("CONFIANCE_COOLDOWN_DAYS", VoteSettings.confiance_cooldown_days),
-                confiance_scan_interval_hours=env.int(
-                    "CONFIANCE_SCAN_INTERVAL_HOURS", VoteSettings.confiance_scan_interval_hours
-                ),
-                db_path=env.str("VOTES_DB_PATH", VoteSettings.db_path),
             ),
             shameless=ShamelessSettings(
                 webhook_secret=env.optional_str("SHAMELESS_WEBHOOK_SECRET"),
@@ -169,11 +136,15 @@ class _EnvReader:
             self._invalid.append(name)
             return default
 
-    def required_int(self, name: str) -> int:
-        if self._raw(name) is None:
+    def required_int(self, name: str, fallback: str | None = None) -> int:
+        """`fallback` : autre nom lu si `name` est absent ; seul `name` est signalé manquant."""
+        source = name
+        if self._raw(name) is None and fallback and self._raw(fallback) is not None:
+            source = fallback
+        if self._raw(source) is None:
             self._missing.append(name)
             return 0
-        return self._convert(name, int, 0)
+        return self._convert(source, int, 0)
 
     def optional_int(self, name: str) -> int | None:
         return self._convert(name, int, None)
