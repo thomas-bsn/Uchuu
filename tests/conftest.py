@@ -1,23 +1,37 @@
-"""Harness partagé Shameless : env de test, fake bot, SQLite temporaire, client HTTP
-monté via create_internal_api(bot), envoi de webhooks signés."""
+"""Harness partagé : BotSettings de test (dict d'env, jamais os.environ), fake bot,
+SQLite temporaire, client HTTP monté via create_internal_api(bot, settings), webhooks signés."""
 import asyncio
-import os
 import threading
+from dataclasses import replace
 
-# Env AVANT tout import du code du bot (runtime_config raise sans DISCORD_TOKEN)
-os.environ.setdefault("DISCORD_TOKEN", "test-token")
-os.environ.setdefault("SHAMELESS_GUILD_ID", "1000")
-os.environ.setdefault("SHAMELESS_BOT_API_KEY", "test-bot-api-key")
+import httpx
+import pytest
 
-import httpx  # noqa: E402
-import pytest  # noqa: E402
+from bot_settings import BotSettings
+from internal_api import create_internal_api
+from tests.fakes import WEBHOOK_PATH, WEBHOOK_SECRET, FakeBot, encode_event, sign_webhook
 
-from internal_api import create_internal_api  # noqa: E402
-from shameless_config import ShamelessSettings  # noqa: E402
-from tests.fakes import WEBHOOK_PATH, WEBHOOK_SECRET, FakeBot, encode_event, sign_webhook  # noqa: E402
+SHAMELESS_GUILD_ID = 1000
+SHAMELESS_BOT_API_KEY = "test-bot-api-key"
 
-SHAMELESS_GUILD_ID = int(os.environ["SHAMELESS_GUILD_ID"])
-SHAMELESS_BOT_API_KEY = os.environ["SHAMELESS_BOT_API_KEY"]
+TEST_ENV = {
+    "DISCORD_TOKEN": "test-token",
+    "INTERNAL_API_KEY": "test-internal-key",
+    "GUILD_ID": str(SHAMELESS_GUILD_ID),
+    "ROLE_INVITE_ID": "11",
+    "ROLE_MEMBRE_ID": "12",
+    "ROLE_CONFIANCE_ID": "13",
+    "CHANNEL_VALIDATION_ID": "20",
+    "CHANNEL_LOGS_ID": "21",
+    "SHAMELESS_WEBHOOK_SECRET": WEBHOOK_SECRET,
+    "SHAMELESS_GUILD_ID": str(SHAMELESS_GUILD_ID),
+    "SHAMELESS_BOT_API_KEY": SHAMELESS_BOT_API_KEY,
+    "SHAMELESS_SHARED_VOICE_ID": "2000",
+    "SHAMELESS_TEAM1_VOICE_ID": "2001",
+    "SHAMELESS_TEAM2_VOICE_ID": "2002",
+    "SHAMELESS_ANNOUNCE_CHANNEL_ID": "3000",
+    "SHAMELESS_WEB_URL": "https://shameless.example",
+}
 
 
 @pytest.fixture
@@ -26,19 +40,19 @@ def shameless_db_path(tmp_path):
 
 
 @pytest.fixture
-def shameless_settings(shameless_db_path):
-    """Settings de test (SQLite temporaire). Variante : dataclasses.replace(shameless_settings, ...)."""
-    return ShamelessSettings(
-        webhook_secret=WEBHOOK_SECRET,
-        db_path=str(shameless_db_path),
-        guild_id=SHAMELESS_GUILD_ID,
-        bot_api_key=SHAMELESS_BOT_API_KEY,
-        shared_voice_id=2000,
-        team1_voice_id=2001,
-        team2_voice_id=2002,
-        announce_channel_id=3000,
-        web_url="https://shameless.example",
-    )
+def bot_settings(tmp_path, shameless_db_path):
+    """Config complète de test, construite comme en prod par from_env (SQLite temporaires)."""
+    return BotSettings.from_env({
+        **TEST_ENV,
+        "SHAMELESS_DB_PATH": str(shameless_db_path),
+        "VOTES_DB_PATH": str(tmp_path / "votes.sqlite3"),
+    })
+
+
+@pytest.fixture
+def shameless_settings(bot_settings):
+    """Sous-section Shameless. Variante : dataclasses.replace(shameless_settings, ...)."""
+    return bot_settings.shameless
 
 
 @pytest.fixture
@@ -61,8 +75,10 @@ def bot_loop():
 
 
 @pytest.fixture
-async def make_client(fake_bot, shameless_settings):
-    """await make_client(bot=None, settings=None) -> httpx.AsyncClient sur create_internal_api(bot).
+async def make_client(fake_bot, bot_settings):
+    """await make_client(bot=None, settings=None) -> httpx.AsyncClient sur create_internal_api(bot, settings).
+
+    `settings` = variante de la sous-section Shameless, injectée dans bot_settings.
 
     Rappeler make_client() = "redémarrage" : nouvelle app, même SQLite. Les handlers
     vivent sur le bot (ré-enregistrés par les cogs au boot) -> passer un FakeBot neuf.
@@ -73,7 +89,7 @@ async def make_client(fake_bot, shameless_settings):
         bot = bot or fake_bot
         if bot.runtime_loop is None:
             bot.runtime_loop = asyncio.get_running_loop()
-        app = create_internal_api(bot, shameless_settings=settings or shameless_settings)
+        app = create_internal_api(bot, replace(bot_settings, shameless=settings) if settings else bot_settings)
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bot")
         clients.append(client)
         return client
