@@ -59,18 +59,28 @@ class InvitePolicy(_RenderedPolicy):
         self.ids = ids
         self.window_seconds = votes.invite_window_seconds
 
-    async def on_open(self, gateway: VoteGateway, target_id: int) -> bool:
+    def is_newcomer(self, member: MemberInfo) -> bool:
+        journey = {self.ids.role_invite_id, self.ids.role_membre_id, self.ids.role_confiance_id}
+        return not member.bot and not journey & member.role_ids
+
+    async def prepare(self, gateway: VoteGateway, target_id: int) -> bool:
         return await gateway.add_role(target_id, self.ids.role_invite_id, "Nouvel arrivant : vote d'admission")
 
     async def on_approved(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id
-        await gateway.remove_role(target, self.ids.role_invite_id, "Admission approuvée")
-        await gateway.add_role(target, self.ids.role_membre_id, "Admission approuvée")
-        return (
-            "✅ **Admission approuvée**\n"
-            f"👤 Utilisateur : <@{target}> ({target})\n"
-            f"{voters_line(vote)}"
-        )
+        who = f"👤 Utilisateur : <@{target}> ({target})"
+        if not await gateway.add_role(target, self.ids.role_membre_id, "Admission approuvée"):
+            return (
+                "❌ **Admission votée, mais rôle Membre impossible à attribuer** "
+                "(membre parti ou permission refusée) : action manuelle requise.\n"
+                f"{who}\n{voters_line(vote)}"
+            )
+        if not await gateway.remove_role(target, self.ids.role_invite_id, "Admission approuvée"):
+            return (
+                "⚠️ **Admission approuvée**, mais rôle Invité impossible à retirer : à retirer à la main.\n"
+                f"{who}\n{voters_line(vote)}"
+            )
+        return f"✅ **Admission approuvée**\n{who}\n{voters_line(vote)}"
 
     async def on_expired(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id
@@ -78,7 +88,7 @@ class InvitePolicy(_RenderedPolicy):
         member = await gateway.member(target)
         if member is None:
             return f"⏱️ **Vote d'admission expiré** — <@{target}> ({target}) a déjà quitté le serveur.\n{voters}"
-        if self.ids.role_invite_id not in member.role_ids:
+        if vote.prepared and self.ids.role_invite_id not in member.role_ids:
             return (
                 f"⏱️ **Vote d'admission expiré** — rôle Invité retiré manuellement, "
                 f"<@{target}> ({target}) n'est pas expulsé.\n{voters}"
@@ -110,17 +120,19 @@ class ConfiancePolicy(_RenderedPolicy):
             return False
         return member.joined_at is not None and now - member.joined_at >= self.eligibility_seconds
 
-    async def on_open(self, gateway: VoteGateway, target_id: int) -> bool:
+    async def prepare(self, gateway: VoteGateway, target_id: int) -> bool:
         return True
 
     async def on_approved(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id
-        await gateway.add_role(target, self.ids.role_confiance_id, "Promotion Confiance approuvée")
-        return (
-            "🎉 **Promotion Confiance approuvée**\n"
-            f"👤 Membre : <@{target}> ({target})\n"
-            f"{voters_line(vote)}"
-        )
+        who = f"👤 Membre : <@{target}> ({target})"
+        if not await gateway.add_role(target, self.ids.role_confiance_id, "Promotion Confiance approuvée"):
+            return (
+                "❌ **Promotion votée, mais rôle Confiance impossible à attribuer** "
+                "(membre parti ou permission refusée) : action manuelle requise.\n"
+                f"{who}\n{voters_line(vote)}"
+            )
+        return f"🎉 **Promotion Confiance approuvée**\n{who}\n{voters_line(vote)}"
 
     async def on_expired(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id

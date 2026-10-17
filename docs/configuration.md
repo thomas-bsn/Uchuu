@@ -58,6 +58,7 @@ Le volume Docker monté sur `/data` contient `shameless.sqlite3` et `votes.sqlit
 ### Base des votes (`votes.sqlite3`)
 
 - Contient chaque vote (cible, type, échéance, statut, message Discord associé) et ses bulletins ✅. Les votes clos restent en base (historique, cooldown Confiance).
+- Contient aussi le *heartbeat* du bot (dernier instant où il tournait, mis à jour toutes les 30 s) : il borne le rattrapage des arrivées au démarrage (voir plus bas).
 - Un redémarrage ne perd rien : les boutons ✅ des messages déjà postés refonctionnent (identifiant stable `vote:<id>:approve`), et un vote ouvert expire à l'heure prévue (vérification toutes les 30 s).
 - Ne supprimez pas ce fichier pendant qu'un vote est ouvert : ses boutons répondraient « vote terminé » et l'Invité ne serait jamais expulsé. Sauvegarde : copiez le fichier bot arrêté (mode WAL : copiez aussi `votes.sqlite3-wal` / `-shm` s'ils existent).
 - Hors Docker, `VOTES_DB_PATH` doit pointer vers un chemin persistant accessible en écriture.
@@ -66,6 +67,16 @@ Le volume Docker monté sur `/data` contient `shameless.sqlite3` et `votes.sqlit
 
 À l'arrivée d'un membre (hors bots) sur `GUILD_ID` : rôle Invité et message de vote dans `CHANNEL_VALIDATION_ID`, avec un bouton ✅. Seuls les membres Confiance votent, jamais pour eux-mêmes ; un double clic ne compte qu'une fois. Au quorum (`VOTE_APPROVALS_REQUIRED`) : Invité → Membre, message supprimé, log avec les votants. À l'expiration (`INVITE_VOTE_WINDOW_SECONDS`) : DM puis kick, sauf si le rôle Invité a été retiré à la main (admission manuelle) ; message supprimé, log. Serveur, rôle ou salon introuvable : le problème est posté dans `CHANNEL_LOGS_ID` (ou les logs du process si ce salon manque), le bot continue.
 
+**Aucun nouvel arrivant bloqué.** Si le rôle Invité ne peut pas être donné ou si le message de vote ne peut pas être posté (permission, salon manquant), le vote reste ouvert et son échéance court quand même : la vérification périodique (toutes les 30 s) retente l'étape manquante, au plus toutes les 5 minutes par vote, jusqu'à réussite ou clôture. À l'expiration, l'Invité est expulsé même si le rôle ou le message n'ont jamais pu être posés ; le retrait manuel du rôle Invité n'empêche le kick que si le bot avait bien donné ce rôle (et le bot ne le redonne jamais après un retrait manuel).
+
+**Arrivées pendant un arrêt du bot.** Au démarrage, le bot ouvre un vote Invité pour chaque membre (hors bots) arrivé après le dernier heartbeat et sans aucun des rôles Invité, Membre ou Confiance. Au tout premier démarrage (aucun heartbeat en base, ex. nouveau `VOTES_DB_PATH`), il n'ouvre rien : jamais de votes en masse pour les membres déjà présents.
+
+**Échec d'un changement de rôle au quorum** (membre parti, permission refusée) : le log l'indique (« rôle Membre impossible à attribuer : action manuelle requise ») au lieu de « Admission approuvée ».
+
 ## Flux de promotion (Membre → Confiance)
 
-Toutes les `CONFIANCE_SCAN_INTERVAL_HOURS` (et au démarrage), le bot propose chaque Membre (hors bots, hors Confiance) présent sur le serveur depuis au moins `CONFIANCE_ELIGIBILITY_DAYS` jours : message de vote dans `CHANNEL_VALIDATION_ID` avec le bouton ✅. Un Membre n'a jamais plus d'un vote ouvert : un scan ne reposte rien pour lui. Mêmes règles de vote que l'admission (Confiance uniquement, pas d'auto-vote, quorum `VOTE_APPROVALS_REQUIRED`). Au quorum : rôle Confiance ajouté (le rôle Membre est conservé), message supprimé, log avec les votants. À l'expiration (`CONFIANCE_VOTE_WINDOW_SECONDS`) : aucun changement de rôle ni kick, message supprimé, log ; le Membre n'est pas reproposé avant `CONFIANCE_COOLDOWN_DAYS` jours (cooldown lu dans `VOTES_DB_PATH`, donc conservé après redémarrage).
+Toutes les `CONFIANCE_SCAN_INTERVAL_HOURS` (et au démarrage), le bot propose chaque Membre (hors bots, hors Confiance) présent sur le serveur depuis au moins `CONFIANCE_ELIGIBILITY_DAYS` jours : message de vote dans `CHANNEL_VALIDATION_ID` avec le bouton ✅. Un Membre n'a jamais plus d'un vote ouvert : un scan ne reposte rien pour lui. Mêmes règles de vote que l'admission (Confiance uniquement, pas d'auto-vote, quorum `VOTE_APPROVALS_REQUIRED`). Au quorum : rôle Confiance ajouté (le rôle Membre est conservé), message supprimé, log avec les votants. À l'expiration (`CONFIANCE_VOTE_WINDOW_SECONDS`) : aucun changement de rôle ni kick, message supprimé, log ; le Membre n'est pas reproposé avant `CONFIANCE_COOLDOWN_DAYS` jours (cooldown lu dans `VOTES_DB_PATH`, donc conservé après redémarrage). Si le rôle Confiance ne peut pas être ajouté au quorum, le log le signale (action manuelle requise) au lieu de « Promotion Confiance approuvée ».
+
+## Erreurs
+
+Toute erreur inattendue du module Vote (expiration, complétion des votes ouverts, rattrapage des arrivées, scan Confiance, clic sur ✅) est postée dans `CHANNEL_LOGS_ID` (« ❌ [votes] … en échec ») en plus des logs du process (trace complète) ; le votant reçoit « Erreur lors du vote. Réessaie plus tard. ». Un vote dont le type est inconnu de la version du bot en cours est signalé une fois dans ce salon et laissé intact (ni clôturé ni modifié).
