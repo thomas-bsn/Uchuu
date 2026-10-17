@@ -1,4 +1,4 @@
-"""Base SQLite partagée par les stores (Shameless, votes).
+"""Base SQLite partagée par les stores (Shameless).
 
 Connexions courtes (une par opération), sûres entre le thread uvicorn, celui du bot
 et `asyncio.to_thread`. Chaque store déclare ses tables dans `SCHEMA`.

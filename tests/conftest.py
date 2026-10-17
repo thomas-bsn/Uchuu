@@ -17,12 +17,7 @@ SHAMELESS_BOT_API_KEY = "test-bot-api-key"
 TEST_ENV = {
     "DISCORD_TOKEN": "test-token",
     "INTERNAL_API_KEY": "test-internal-key",
-    "GUILD_ID": str(SHAMELESS_GUILD_ID),
-    "ROLE_INVITE_ID": "11",
-    "ROLE_MEMBRE_ID": "12",
-    "ROLE_CONFIANCE_ID": "13",
-    "CHANNEL_VALIDATION_ID": "20",
-    "CHANNEL_LOGS_ID": "21",
+    "CHANNEL_MATCH_HISTORY_ID": "22",
     "SHAMELESS_WEBHOOK_SECRET": WEBHOOK_SECRET,
     "SHAMELESS_GUILD_ID": str(SHAMELESS_GUILD_ID),
     "SHAMELESS_BOT_API_KEY": SHAMELESS_BOT_API_KEY,
@@ -44,7 +39,6 @@ def bot_settings(tmp_path, shameless_db_path):
     return BotSettings.from_env({
         **TEST_ENV,
         "SHAMELESS_DB_PATH": str(shameless_db_path),
-        "VOTES_DB_PATH": str(tmp_path / "votes.sqlite3"),
     })
 
 
