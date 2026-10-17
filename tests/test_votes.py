@@ -1,10 +1,10 @@
 """Module Vote, testé à son interface : fake gateway, horloge contrôlée, SQLite temporaire."""
 import pytest
 
-from services.vote import Votes
+from services.vote import RETRY_SECONDS, Votes
 from services.vote_policies import InvitePolicy
 from services.vote_store import VoteStore
-from services.vote_types import VoteKind
+from services.vote_types import VoteKind, VoteStatus
 from tests.vote_fakes import FakeClock, FakeVoteGateway
 
 INVITE, MEMBRE, CONFIANCE = 11, 12, 13  # ids de rôles de TEST_ENV
@@ -207,21 +207,72 @@ async def test_an_open_vote_expires_on_schedule_after_a_restart(make_votes, gate
     assert gateway.kicked == [NEWCOMER]
 
 
-async def test_without_a_validation_channel_the_problem_is_logged_and_nobody_is_kicked_later(votes, gateway, clock):
+async def test_a_vote_message_that_could_not_be_posted_is_posted_by_the_next_tick(votes, gateway, clock):
     gateway.validation_channel_available = False
 
-    assert await votes.open(VoteKind.INVITE, NEWCOMER) is None
+    vote = await votes.open(VoteKind.INVITE, NEWCOMER)
 
+    assert vote.status == VoteStatus.OPEN
+    assert INVITE in gateway.roles_of(NEWCOMER)
     assert gateway.logs  # le problème est loggé
-    clock.advance(DAY)
-    assert await votes.expire_due() == []
-    assert gateway.kicked == []
-
-
-async def test_no_vote_opens_when_the_invite_role_cannot_be_given(votes, gateway):
-    assert await votes.open(VoteKind.INVITE, 999) is None  # membre introuvable
-
     assert gateway.live_messages() == []
+
+    gateway.validation_channel_available = True
+    clock.advance(RETRY_SECONDS)
+    await votes.reconcile()
+
+    [message] = gateway.live_messages()
+    assert f"<@{NEWCOMER}>" in message.content
+    await votes.approve(vote.id, ALICE)
+    assert MEMBRE in gateway.roles_of(NEWCOMER)
+    assert gateway.live_messages() == []
+
+
+async def test_an_invite_whose_vote_was_never_posted_is_still_kicked_at_expiry(votes, gateway, clock):
+    gateway.validation_channel_available = False
+    await votes.open(VoteKind.INVITE, NEWCOMER)
+
+    clock.advance(DAY)
+    await votes.expire_due()
+
+    assert gateway.kicked == [NEWCOMER]
+
+
+async def test_an_invite_role_that_could_not_be_given_is_given_by_the_next_tick(votes, gateway, clock):
+    gateway.role_changes_fail = True
+
+    vote = await votes.open(VoteKind.INVITE, NEWCOMER)
+
+    assert vote.status == VoteStatus.OPEN
+    assert INVITE not in gateway.roles_of(NEWCOMER)
+    assert len(gateway.live_messages()) == 1
+
+    gateway.role_changes_fail = False
+    clock.advance(RETRY_SECONDS)
+    await votes.reconcile()
+
+    assert INVITE in gateway.roles_of(NEWCOMER)
+    assert len(gateway.live_messages()) == 1  # rien de reposté
+
+
+async def test_an_invite_never_given_the_role_is_still_kicked_at_expiry(votes, gateway, clock):
+    gateway.role_changes_fail = True
+    await votes.open(VoteKind.INVITE, NEWCOMER)
+
+    clock.advance(DAY)
+    await votes.expire_due()
+
+    assert gateway.kicked == [NEWCOMER]
+
+
+async def test_the_tick_does_not_give_back_an_invite_role_removed_by_hand(votes, gateway, clock):
+    await votes.open(VoteKind.INVITE, NEWCOMER)
+    await gateway.remove_role(NEWCOMER, INVITE, "admission manuelle")
+
+    await votes.reconcile()
+
+    assert INVITE not in gateway.roles_of(NEWCOMER)
+    assert len(gateway.live_messages()) == 1
 
 
 async def test_a_target_has_at_most_one_open_vote_per_policy(votes, gateway):
@@ -230,3 +281,92 @@ async def test_a_target_has_at_most_one_open_vote_per_policy(votes, gateway):
 
     assert again.id == first.id
     assert len(gateway.live_messages()) == 1
+
+
+async def test_on_the_very_first_start_no_vote_is_opened_for_existing_members(make_votes, gateway, clock):
+    gateway.add_member(300, joined_at=clock.now - DAY)  # sans rôle, déjà là avant le bot
+
+    assert await make_votes().catch_up_arrivals(VoteKind.INVITE) == []
+
+    assert gateway.live_messages() == []
+    assert gateway.roles_of(300) == set()
+
+
+async def test_arrivals_during_downtime_get_their_invite_vote_at_startup(make_votes, gateway, clock):
+    gateway.add_member(300, joined_at=clock.now - DAY)  # arrivé avant le dernier heartbeat
+    await make_votes().heartbeat()
+    clock.advance(3600)  # bot arrêté une heure
+    gateway.add_member(301, joined_at=clock.now - 1800)
+    gateway.add_member(302, MEMBRE, joined_at=clock.now - 1800)  # admis à la main entre-temps
+    gateway.add_member(303, INVITE, joined_at=clock.now - 1800)
+    gateway.add_member(304, CONFIANCE, joined_at=clock.now - 1800)
+    gateway.add_member(305, bot=True, joined_at=clock.now - 1800)
+
+    opened = await make_votes().catch_up_arrivals(VoteKind.INVITE)
+
+    assert [vote.target_id for vote in opened] == [301]
+    assert INVITE in gateway.roles_of(301)
+    [message] = gateway.live_messages()
+    assert "<@301>" in message.content
+
+
+
+async def test_an_approval_whose_role_change_fails_is_logged_as_a_failure(votes, gateway):
+    vote = await votes.open(VoteKind.INVITE, NEWCOMER)
+    gateway.role_changes_fail = True  # ex. Forbidden
+
+    await votes.approve(vote.id, ALICE)
+
+    [log] = gateway.logs
+    assert "approuvée" not in log
+    assert "Membre" in log and "impossible" in log
+    assert f"<@{NEWCOMER}>" in log and f"<@{ALICE}>" in log
+
+
+async def test_an_approval_for_an_invite_who_left_is_logged_as_a_failure(votes, gateway):
+    vote = await votes.open(VoteKind.INVITE, NEWCOMER)
+    del gateway.roster[NEWCOMER]
+
+    await votes.approve(vote.id, ALICE)
+
+    [log] = gateway.logs
+    assert "approuvée" not in log
+    assert "impossible" in log
+
+
+async def test_a_ballot_that_loses_the_quorum_race_is_told_it_was_recorded(votes, gateway):
+    import asyncio
+
+    vote = await votes.open(VoteKind.INVITE, NEWCOMER)
+    both_checked = asyncio.Barrier(2)
+    lookup = gateway.member
+
+    async def member(member_id):  # ALICE et BOB cliquent au même instant
+        info = await lookup(member_id)
+        if member_id in (ALICE, BOB):
+            await both_checked.wait()
+        return info
+
+    gateway.member = member
+    replies = await asyncio.gather(votes.approve(vote.id, ALICE), votes.approve(vote.id, BOB))
+
+    assert MEMBRE in gateway.roles_of(NEWCOMER)
+    assert len(gateway.logs) == 1
+    assert sum("quorum atteint" in reply for reply in replies) == 1
+    late = next(reply for reply in replies if "quorum atteint" not in reply)
+    assert "terminé" not in late
+    assert "enregistré" in late and "déjà" in late
+
+
+async def test_an_incomplete_vote_is_retried_at_most_every_few_minutes(votes, gateway, clock):
+    gateway.validation_channel_available = False
+    await votes.open(VoteKind.INVITE, NEWCOMER)
+    failures = len(gateway.logs)
+
+    clock.advance(RETRY_SECONDS - 1)
+    await votes.reconcile()
+    assert len(gateway.logs) == failures
+
+    clock.advance(1)
+    await votes.reconcile()
+    assert len(gateway.logs) == 2 * failures

@@ -143,3 +143,37 @@ async def test_after_an_expired_vote_the_membre_waits_for_the_cooldown_even_acro
     clock.now = expired_at + 30 * DAY
     reopened = await make_votes().scan(VoteKind.CONFIANCE)
     assert [vote.target_id for vote in reopened] == [VETERAN]
+
+
+async def test_a_confiance_approval_whose_role_change_fails_is_logged_as_a_failure(votes, gateway):
+    [vote] = await votes.scan(VoteKind.CONFIANCE)
+    gateway.role_changes_fail = True
+
+    await votes.approve(vote.id, ALICE)
+
+    [log] = gateway.logs
+    assert "approuvée" not in log
+    assert "Confiance" in log and "impossible" in log
+    assert f"<@{VETERAN}>" in log
+
+
+async def test_a_vote_of_a_kind_without_policy_is_reported_and_left_untouched(bot_settings, make_votes, gateway, clock):
+    [vote] = await make_votes().scan(VoteKind.CONFIANCE)
+    invite_only = Votes(  # ex. version du bot qui ne connaît pas ce type de vote
+        VoteStore(bot_settings.votes.db_path),
+        gateway,
+        [InvitePolicy(bot_settings.ids, bot_settings.votes)],
+        approvals_required=1,
+        voter_role_id=CONFIANCE,
+        clock=clock,
+    )
+
+    clock.advance(DAY)
+    assert await invite_only.expire_due() == []
+    await invite_only.reconcile()
+    reply = await invite_only.approve(vote.id, ALICE)
+
+    assert "terminé" not in reply
+    assert any(f"vote {vote.id}" in log for log in gateway.logs)
+    assert CONFIANCE not in gateway.roles_of(VETERAN)
+    assert await make_votes().expire_due() == [vote.id]  # intact : expire normalement ensuite
