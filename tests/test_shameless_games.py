@@ -8,90 +8,21 @@ from dataclasses import replace
 
 import pytest
 
-from cogs.shameless_games import ShamelessGames
 from services.shameless_games_store import GameAttendanceStore
-from tests.fakes import FakeBot, FakeVoiceState, make_event
-
-GUILD_ID = 1000
-SHARED, TEAM1, TEAM2, OTHER_VOICE = 2000, 2001, 2002, 2999  # SHARED : vocal quelconque, non configuré
-OTHER_GUILD_ID, FOREIGN_VOICE = 4000, 4001
-ANNOUNCE = 3000
-
-
-def team(name, side, players):
-    return {"name": name, "side": side, "players": players}
-
-
-def player(name, discord_id, **stats):
-    return {"name": name, "discord_id": discord_id, **stats}
-
-
-TEAM_A = team("Les Chauves", "blue", [player(f"A{i}", str(100 + i)) for i in range(1, 6)])
-TEAM_B = team("Les Barbus", "red", [player(f"B{i}", str(200 + i)) for i in range(1, 6)])
-PARTICIPANTS = [p["discord_id"] for p in TEAM_A["players"] + TEAM_B["players"]]
-
-
-def game_started(game_id="g-1", game_number=1, series_id="s-1", **extra):
-    data = {
-        "series_id": series_id,
-        "game_id": game_id,
-        "game_number": game_number,
-        "best_of": 3,
-        # même forme de Teams que teams_formed (#4)
-        "team_a": TEAM_A,
-        "team_b": TEAM_B,
-        "participant_discord_ids": PARTICIPANTS,
-        **extra,
-    }
-    return make_event("game_started", data)
-
-
-def game_completed(game_id="g-1", game_number=1, series_id="s-1", **overrides):
-    data = {
-        "series_id": series_id,
-        "game_id": game_id,
-        "game_number": game_number,
-        "best_of": 3,
-        "winner": "A",
-        "series_score": {"A": 1, "B": 0},
-        "duration_seconds": 1834,
-        "recap_url": f"https://shameless.example/games/{game_id}",
-        "team_a": team("Les Chauves", "blue", [
-            player("Zed Main", "101", champion="Zed", role="MID", kills=12, deaths=3, assists=7,
-                   cs=243, cs_per_min=7.9, kill_participation=0.61, damage=31250, performance_score=88),
-        ]),
-        "team_b": team("Les Barbus", "red", [
-            player("Feeder", "201", champion="Yuumi", role="SUPPORT", kills=0, deaths=11, assists=4,
-                   cs=12, cs_per_min=0.4, kill_participation=0.33, damage=4100, performance_score=12),
-        ]),
-        "participant_discord_ids": PARTICIPANTS,
-    }
-    data.update(overrides)
-    return make_event("game_completed", data)
-
-
-@pytest.fixture
-def guild(fake_bot):
-    guild = fake_bot.add_guild(GUILD_ID)
-    for channel_id in (SHARED, TEAM1, TEAM2, OTHER_VOICE):
-        guild.add_voice_channel(channel_id)
-    guild.add_text_channel(ANNOUNCE)
-    return guild
-
-
-async def load_games(bot, settings):
-    """Le cog tel que chargé au boot : cog_load enregistre ses handlers sur le dispatcher."""
-    cog = ShamelessGames(bot, settings)
-    await cog.cog_load()
-    return cog
-
-
-@pytest.fixture
-def other_guild(fake_bot):
-    """Un autre serveur où le bot est aussi présent : ses vocaux ne comptent pas."""
-    guild = fake_bot.add_guild(OTHER_GUILD_ID)
-    guild.add_voice_channel(FOREIGN_VOICE)
-    return guild
+from tests.fakes import (
+    ANNOUNCE,
+    FOREIGN_VOICE,
+    OTHER_VOICE,
+    SHARED,
+    TEAM1,
+    TEAM2,
+    FakeBot,
+    game_completed,
+    game_started,
+    join,
+    load_games,
+    make_event,
+)
 
 
 @pytest.fixture
@@ -306,18 +237,6 @@ async def test_recap_interrupted_by_timeout_is_posted_exactly_once_on_retry(
 def spectators(settings, game_id):
     """Interface lue par le futur workflow de vote (Phase 2)."""
     return GameAttendanceStore(settings.db_path).spectators(game_id)
-
-
-async def join(cog, member, channel):
-    """Simule l'event gateway on_voice_state_update."""
-    before = FakeVoiceState(member.voice_channel) if member.voice_channel else None
-    if member.voice_channel is not None:
-        member.voice_channel.members.remove(member)
-    member.voice_channel = channel
-    if channel is not None:
-        channel.members.append(member)
-    after = FakeVoiceState(channel) if channel else None
-    await cog.on_voice_state_update(member, before, after)
 
 
 async def test_spectators_in_any_voice_of_the_server_at_game_start_are_recorded(

@@ -4,19 +4,22 @@ Handlers branchés sur le dispatcher webhook de #2 (game_started / game_complete
 Présences (US 24) : entre game_started et game_completed d'une Game, on note les humains
 vus dans n'importe quel salon vocal du serveur Shameless (SHAMELESS_GUILD_ID), hors Joueurs
 de la Game et hors bots. Tout est dans SQLite -> un redémarrage en pleine Game reprend la
-fenêtre ouverte.
-SQLite est appelé via asyncio.to_thread : jamais d'I/O bloquante sur la boucle du bot.
+fenêtre ouverte. À la clôture (#14), l'ensemble observé est transmis à l'API Shameless
+(`PUT /bot/games/{id}/spectateurs`) avant la fermeture des votes.
+SQLite et l'appel HTTP sont attendus hors de la boucle du bot : jamais d'I/O bloquante.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from discord.ext import commands
 
+from services.shameless_client import ShamelessApiClient, ShamelessApiError, client_from_settings
 from services.shameless_events import EVENT_GAME_COMPLETED, EVENT_GAME_STARTED, ShamelessEvent, get_dispatcher
 from services.shameless_games_store import POST_GAME_RECAP, POST_SERIES_ANNOUNCE, GameAttendanceStore, GamePostsStore
-from services.shameless_payloads import participant_discord_ids
+from services.shameless_payloads import game_id_of, participant_discord_ids
 from services.shameless_recap import game_recap, series_announcement
 from shameless_config import ShamelessSettings
 
@@ -24,11 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 class ShamelessGames(commands.Cog):
-    def __init__(self, bot, settings: ShamelessSettings):
+    def __init__(self, bot, settings: ShamelessSettings, api: ShamelessApiClient | None = None):
         self.bot = bot
         self.settings = settings
         self.posts = GamePostsStore(settings.db_path)
         self.attendance = GameAttendanceStore(settings.db_path)
+        # client injecté en test ; sinon construit à la première transmission depuis la config
+        self._api = api
 
     async def cog_load(self):
         dispatcher = get_dispatcher(self.bot)
@@ -37,8 +42,10 @@ class ShamelessGames(commands.Cog):
 
     async def cog_unload(self):
         dispatcher = get_dispatcher(self.bot)
-        dispatcher.unregister(EVENT_GAME_STARTED)
-        dispatcher.unregister(EVENT_GAME_COMPLETED)
+        dispatcher.unregister(EVENT_GAME_STARTED, self.on_game_started)
+        dispatcher.unregister(EVENT_GAME_COMPLETED, self.on_game_completed)
+        if self._api is not None:
+            await self._api.aclose()
 
     # =========================
     # WEBHOOK HANDLERS
@@ -70,6 +77,10 @@ class ShamelessGames(commands.Cog):
 
         key = str(game_id or event.event_id)
         await self._post_once(POST_GAME_RECAP, key, lambda: game_recap(data, self.settings.web_url))
+
+        # en dernier : un échec de transmission (500) laisse le récap déjà publié et ne fait
+        # rejouer, au retry, que cette transmission (remplace l'ensemble, sans doublon)
+        await self._transmit_spectators(data)
 
     # =========================
     # VOICE (présences)
@@ -120,6 +131,30 @@ class ShamelessGames(commands.Cog):
                 self.attendance.record(game_id, present - participants)
 
         await asyncio.to_thread(_record)
+
+    async def _transmit_spectators(self, data: dict[str, Any]) -> None:
+        """Pousse vers l'API l'ensemble observé pendant la Game (fenêtre fermée à la clôture)."""
+        game_id = game_id_of(data)
+        if game_id is None:
+            # payload non réparable par un retry : log + event acquitté
+            logger.warning("shameless: game_id absent ou invalide, Spectateurs non transmis : %r", data.get("game_id"))
+            return
+
+        spectators = await asyncio.to_thread(self.attendance.spectators, str(data["game_id"]))
+        try:
+            await self._api_client().put_spectateurs(game_id, spectators)
+        except ShamelessApiError as error:
+            if error.is_permanent:
+                # votes déjà clos, payload refusé, Game inconnue : retenter n'y changerait rien
+                logger.warning("shameless: Spectateurs de la Game %s refusés : %s", game_id, error)
+                return
+            raise  # panne réseau, 5xx ou clé à corriger : Shameless retente (le PUT remplace)
+
+    def _api_client(self) -> ShamelessApiClient:
+        # config absente -> ShamelessApiError : l'event n'est pas acquitté, Shameless retente
+        if self._api is None:
+            self._api = client_from_settings(self.settings)
+        return self._api
 
     async def _post_once(self, kind: str, key: str, build_embed) -> None:
         # salon résolu AVANT la réservation : absent / inaccessible -> exception, l'event

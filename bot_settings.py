@@ -88,11 +88,23 @@ class BotSettings:
                 ),
                 claim_lease_seconds=env.float("SHAMELESS_CLAIM_LEASE_SECONDS", ShamelessSettings.claim_lease_seconds),
                 bot_api_key=env.optional_str("SHAMELESS_BOT_API_KEY"),
+                api_url=env.optional_str("SHAMELESS_API_URL"),
+                bot_to_api_key=env.optional_str("SHAMELESS_BOT_TO_API_KEY"),
                 guild_id=env.optional_int("SHAMELESS_GUILD_ID"),
                 team1_voice_id=env.optional_int("SHAMELESS_TEAM1_VOICE_ID"),
                 team2_voice_id=env.optional_int("SHAMELESS_TEAM2_VOICE_ID"),
                 announce_channel_id=env.optional_int("SHAMELESS_ANNOUNCE_CHANNEL_ID"),
+                vote_channel_id=env.optional_int("SHAMELESS_VOTE_CHANNEL_ID"),
+                vote_duration_seconds=env.float(
+                    "SHAMELESS_VOTE_DURATION_SECONDS", ShamelessSettings.vote_duration_seconds
+                ),
                 web_url=env.optional_str("SHAMELESS_WEB_URL"),
+                pronostics_channel_id=env.optional_int("SHAMELESS_PRONOSTICS_CHANNEL_ID"),
+                pronostics_reconcile_seconds=env.float(
+                    "SHAMELESS_PRONOSTICS_RECONCILE_SECONDS", ShamelessSettings.pronostics_reconcile_seconds
+                ),
+                clips_channel_id=env.optional_int("SHAMELESS_CLIPS_CHANNEL_ID"),
+                clips_max_bytes=env.int("SHAMELESS_CLIPS_MAX_BYTES", ShamelessSettings.clips_max_bytes),
             ),
         )
         env.raise_if_errors()

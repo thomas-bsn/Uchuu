@@ -93,8 +93,8 @@ async def receive_webhook(
         raise HTTPException(status_code=422, detail=f"unsupported version {event.version}")
 
     bot = request.app.state.bot
-    handler = get_dispatcher(bot).handler_for(event.type)
-    if handler is None:
+    handlers = get_dispatcher(bot).handlers_for(event.type)
+    if not handlers:
         return {"status": "ignored", "event_id": event.event_id}
 
     require_bot_ready(request)
@@ -109,7 +109,9 @@ async def receive_webhook(
         raise HTTPException(status_code=409, detail="in_progress")
 
     try:
-        await run_on_bot_loop(bot, handler(event), settings.handler_timeout_seconds)
+        # plusieurs cogs peuvent écouter le même type : chacun son tour, dans l'ordre d'enregistrement
+        for handler in handlers:
+            await run_on_bot_loop(bot, handler(event), settings.handler_timeout_seconds)
     except asyncio.TimeoutError:
         # handler annulé mais état Discord incertain -> la réservation expire après le
         # lease, puis un retry la reprend (effets des handlers idempotents)

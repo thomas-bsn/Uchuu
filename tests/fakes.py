@@ -11,7 +11,17 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from cogs.shameless_clips import ShamelessClips
+from cogs.shameless_games import ShamelessGames
+from cogs.shameless_pronostics import ShamelessPronostics
 
 
 # =========================
@@ -27,10 +37,19 @@ class FakeMember:
     moves: list[int | None] = field(default_factory=list)  # ids des salons cibles, dans l'ordre
 
     @property
+    def display_name(self) -> str:
+        # comme discord.Member.display_name : le nom affiché, jamais vide
+        return self.name
+
+    @property
     def voice(self):
         if self.voice_channel is None:
             return None
         return FakeVoiceState(channel=self.voice_channel)
+
+    @property
+    def display_name(self) -> str:
+        return self.name
 
     async def move_to(self, channel, *, reason: str | None = None):
         if self.voice_channel is not None:
@@ -70,12 +89,104 @@ class FakeTextChannel:
         self.sent.append({"content": content, **kwargs})
         return FakeMessage(channel=self, content=content, kwargs=kwargs)
 
+    def views(self) -> list[Any]:
+        """Vues attachées aux messages envoyés (persistantes pour #15)."""
+        return [m["view"] for m in self.sent if m.get("view") is not None]
+
+
+@dataclass(eq=False)
+class FakeUser:
+    id: int
+    name: str = "member"
+    bot: bool = False
+
+    @property
+    def display_name(self) -> str:
+        return self.name
+
+
+@dataclass(eq=False)
+class FakeResponse:
+    """Réponse d'une interaction : ce que le votant verrait (éphémère ou non)."""
+
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    deferred: list[dict[str, Any]] = field(default_factory=list)
+    modal: Any = None
+
+    async def send_message(self, content=None, **kwargs):
+        self.messages.append({"content": content, **kwargs})
+
+    async def defer(self, **kwargs):
+        self.deferred.append(kwargs)
+
+    async def edit_message(self, **kwargs):
+        self.messages.append({"edited": True, **kwargs})
+
+    async def send_modal(self, modal):
+        self.modal = modal
+
+
+@dataclass(eq=False)
+class FakeInteraction:
+    """Interaction Discord : un membre qui clique (Joueur, Spectateur) et sa réponse.
+
+    `response` est la réponse éphémère (acquittement, refus) ; `replies`/`content` la
+    relisent comme les tests de #15 et #16 le font."""
+
+    user: FakeUser
+    message: Any = None
+    response: FakeResponse = field(default_factory=FakeResponse)
+    guild: Any = None
+    channel: Any = None
+
+    @property
+    def replies(self) -> list[dict[str, Any]]:
+        return self.response.messages
+
+    @property
+    def content(self) -> str | None:
+        return self.replies[-1]["content"] if self.replies else None
+
 
 @dataclass
 class FakeMessage:
+    """Message Discord minimal : ce qu'un listener on_message peut lire (auteur, date,
+    pièces jointes). `reply` enregistre la réponse dans `.sent` du salon, comme `send`."""
+
     channel: FakeTextChannel
-    content: str | None
-    kwargs: dict[str, Any]
+    content: str | None = None
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    id: int = 0
+    author: "FakeMember | None" = None
+    attachments: list["FakeAttachment"] = field(default_factory=list)
+    created_at: datetime | None = None
+
+    async def reply(self, content=None, **kwargs):
+        self.channel.sent.append({"content": content, "reply_to": self.id, **kwargs})
+        return FakeMessage(channel=self.channel, content=content, kwargs=kwargs)
+
+
+@dataclass(eq=False)
+class FakeAttachment:
+    """Pièce jointe Discord : `read()` rend les octets fournis, sans jamais toucher au réseau.
+
+    `size` est explicite quand le test veut une pièce jointe « trop grosse » sans en
+    allouer le contenu (le bot doit refuser avant de télécharger)."""
+
+    id: int
+    filename: str = "clip.mp4"
+    content_type: str | None = "video/mp4"
+    data: bytes = b""
+    size: int | None = None
+    reads: int = 0  # nombre de téléchargements : preuve qu'une pièce refusée n'est pas lue
+
+    def __post_init__(self):
+        if self.size is None:
+            self.size = len(self.data)
+
+    async def read(self) -> bytes:
+        self.reads += 1
+        return self.data
 
 
 @dataclass(eq=False)
@@ -127,6 +238,10 @@ class FakeBot:
         self.guilds: list[FakeGuild] = list(guilds)
         self.runtime_loop = runtime_loop
         self.loop = runtime_loop
+        self.views: list[Any] = []  # vues persistantes enregistrées (add_view)
+
+    def add_view(self, view, *, message_id: int | None = None):
+        self.views.append(view)
 
     def add_guild(self, guild_id: int) -> FakeGuild:
         guild = FakeGuild(guild_id)
@@ -148,6 +263,583 @@ class FakeBot:
         if channel is None:
             raise LookupError(f"unknown channel {channel_id}")
         return channel
+
+
+# =========================
+# SHAMELESS GAMES (Annonce de Série / récap de Game) — partagé par #5 et #14
+# =========================
+
+GUILD_ID = 1000
+SHARED, TEAM1, TEAM2, OTHER_VOICE = 2000, 2001, 2002, 2999  # SHARED : vocal quelconque, non configuré
+OTHER_GUILD_ID, FOREIGN_VOICE = 4000, 4001
+ANNOUNCE = 3000
+VOTE = 3001  # salon des bulletins MVP/DOFD (#15)
+PRONOSTICS = 3002  # salon des bulletins de pronostics (#16)
+
+
+def team(name, side, players):
+    return {"name": name, "side": side, "players": players}
+
+
+def player(name, discord_id, **stats):
+    return {"name": name, "discord_id": discord_id, **stats}
+
+
+TEAM_A = team("Les Chauves", "blue", [player(f"A{i}", str(100 + i)) for i in range(1, 6)])
+TEAM_B = team("Les Barbus", "red", [player(f"B{i}", str(200 + i)) for i in range(1, 6)])
+PARTICIPANTS = [p["discord_id"] for p in TEAM_A["players"] + TEAM_B["players"]]
+
+
+def game_started(game_id="g-1", game_number=1, series_id="s-1", **extra):
+    data = {
+        "series_id": series_id,
+        "game_id": game_id,
+        "game_number": game_number,
+        "best_of": 3,
+        # même forme de Teams que teams_formed (#4)
+        "team_a": TEAM_A,
+        "team_b": TEAM_B,
+        "participant_discord_ids": PARTICIPANTS,
+        **extra,
+    }
+    return make_event("game_started", data)
+
+
+def game_completed(game_id="g-1", game_number=1, series_id="s-1", **overrides):
+    data = {
+        "series_id": series_id,
+        "game_id": game_id,
+        "game_number": game_number,
+        "best_of": 3,
+        "winner": "A",
+        "series_score": {"A": 1, "B": 0},
+        "duration_seconds": 1834,
+        "recap_url": f"https://shameless.example/games/{game_id}",
+        "team_a": team("Les Chauves", "blue", [
+            player("Zed Main", "101", champion="Zed", role="MID", kills=12, deaths=3, assists=7,
+                   cs=243, cs_per_min=7.9, kill_participation=0.61, damage=31250, performance_score=88),
+        ]),
+        "team_b": team("Les Barbus", "red", [
+            player("Feeder", "201", champion="Yuumi", role="SUPPORT", kills=0, deaths=11, assists=4,
+                   cs=12, cs_per_min=0.4, kill_participation=0.33, damage=4100, performance_score=12),
+        ]),
+        "participant_discord_ids": PARTICIPANTS,
+    }
+    data.update(overrides)
+    return make_event("game_completed", data)
+
+
+def teams_formed(series_id="s-1", **extra):
+    data = {
+        "series_id": series_id,
+        "team_a": TEAM_A,
+        "team_b": TEAM_B,
+        "participant_discord_ids": PARTICIPANTS,
+        **extra,
+    }
+    return make_event("teams_formed", data)
+
+
+async def load_games(bot, settings, api=None):
+    """Le cog tel que chargé au boot : cog_load enregistre ses handlers sur le dispatcher.
+
+    `api` : client Shameless injecté (tests de transmission #14) ; None -> construit depuis
+    la config à la première transmission.
+    """
+    cog = ShamelessGames(bot, settings, api=api)
+    await cog.cog_load()
+    return cog
+
+
+async def load_votes(bot, settings, api=None, clock=None):
+    """Cog des votes MVP/DOFD (#15), chargé comme au boot (enregistre son handler)."""
+    from cogs.shameless_votes import ShamelessVotes
+
+    cog = ShamelessVotes(bot, settings, api=api, clock=clock or time.time)
+    await cog.cog_load()
+    return cog
+
+
+# =========================
+# CONTEXTE GAME (GameDuBot, #15) — Joueurs et comptes Discord liés
+# =========================
+
+VOTE_PLAYERS_A = [{"playerId": 10 + i, "prenom": f"A{i}", "discordId": str(100 + i)} for i in range(1, 6)]
+VOTE_PLAYERS_B = [{"playerId": 20 + i, "prenom": f"B{i}", "discordId": str(200 + i)} for i in range(1, 6)]
+VOTE_PLAYERS = VOTE_PLAYERS_A + VOTE_PLAYERS_B
+
+
+def iso(epoch: float) -> str:
+    """Horodatage ISO 8601 UTC, comme `completedAt` du contrat."""
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def game_du_bot(
+    game_id=1,
+    *,
+    completed_at: str | None = "2026-10-17T20:00:00Z",
+    status: str = "completed",
+    winner: str | None = "A",
+    team_a=None,
+    team_b=None,
+    series_id=1,
+    game_number=1,
+    best_of=1,
+) -> dict[str, Any]:
+    """Réponse `GameDuBot` de `GET /bot/games/{id}` (dix Joueurs, chacun lié à un compte)."""
+    return {
+        "gameId": game_id,
+        "seriesId": series_id,
+        "gameNumber": game_number,
+        "bestOf": best_of,
+        "status": status,
+        "startedAt": "2026-10-17T19:30:00Z",
+        "completedAt": completed_at,
+        "winner": winner if status == "completed" else None,
+        "teamA": team_a if team_a is not None else VOTE_PLAYERS_A,
+        "teamB": team_b if team_b is not None else VOTE_PLAYERS_B,
+    }
+
+
+# =========================
+# INTERACTIONS DISCORD (View / Select / Button) — #15
+# =========================
+
+def view_of(channel, index: int = -1):
+    """La vue attachée au message `index` du salon (persistante pour #15)."""
+    return channel.views()[index]
+
+
+def component(view, custom_id: str):
+    return next(item for item in view.children if getattr(item, "custom_id", None) == custom_id)
+
+
+async def choose(view, custom_id: str, interaction, values):
+    """Sélectionne des valeurs dans un Select de la vue, comme Discord le ferait."""
+    item = component(view, custom_id)
+    item._values = list(values)  # ce que _refresh_state alimente avec interaction.data["values"]
+    await item.callback(interaction)
+
+
+async def press(view, custom_id: str, interaction):
+    """Clique un bouton de la vue."""
+    await component(view, custom_id).callback(interaction)
+
+
+async def join(cog, member, channel):
+    """Simule l'event gateway on_voice_state_update."""
+    before = FakeVoiceState(member.voice_channel) if member.voice_channel else None
+    if member.voice_channel is not None:
+        member.voice_channel.members.remove(member)
+    member.voice_channel = channel
+    if channel is not None:
+        channel.members.append(member)
+    after = FakeVoiceState(channel) if channel else None
+    await cog.on_voice_state_update(member, before, after)
+
+
+async def load_pronostics(bot, settings, api=None):
+    """Cog Pronostics (#16) tel que chargé au boot : cog_load enregistre ses handlers.
+
+    `api` : client Shameless injecté (tests) ; None -> construit depuis la config.
+    """
+    cog = ShamelessPronostics(bot, settings, api=api)
+    await cog.cog_load()
+    return cog
+
+
+# =========================
+# SHAMELESS API FAKE (bot -> API)
+# =========================
+
+class PutSpectateurs(BaseModel):
+    """`SignalerSpectateursRequest` du contrat OpenAPI (tag Bot)."""
+
+    discordIds: list[str]
+
+
+class PronostiquerRequest(BaseModel):
+    """`PronostiquerRequest` du contrat OpenAPI (tag Bot). Tous les champs sont requis."""
+
+    pronostiqueurDiscordId: str
+    pronostiqueurNom: str | None
+    gameNumber: int
+    equipeGagnante: str | None
+    mvpPlayerId: int | None
+    dofdPlayerId: int | None
+
+
+def bot_player(player_id: int, prenom: str, discord_id: str | None = None) -> dict[str, Any]:
+    """`JoueurDuBot` du contrat (playerId / prenom / discordId)."""
+    return {"playerId": player_id, "prenom": prenom, "discordId": discord_id}
+
+
+# Composition courante de la Série pour les tests : 5 Joueurs par équipe, IDs Discord liés 101..105 / 201..205
+COMPOSITION_A = [bot_player(11 + i, f"A{i + 1}", str(101 + i)) for i in range(5)]
+COMPOSITION_B = [bot_player(21 + i, f"B{i + 1}", str(201 + i)) for i in range(5)]
+COMPOSITION_PLAYER_IDS = {p["playerId"] for p in COMPOSITION_A + COMPOSITION_B}
+COMPOSITION_DISCORD_IDS = {p["discordId"] for p in COMPOSITION_A + COMPOSITION_B}
+
+
+def series_pronostics(series_id: int = 1, game_number: int | None = 1, best_of: int = 3,
+                      team_a=None, team_b=None) -> dict[str, Any]:
+    """`PronosticsDeLaSerie` du contrat : la Game ouverte (gameNumber null = verrouillé)."""
+    return {
+        "seriesId": series_id,
+        "bestOf": best_of,
+        "gameNumber": game_number,
+        "teamA": list(COMPOSITION_A if team_a is None else team_a),
+        "teamB": list(COMPOSITION_B if team_b is None else team_b),
+    }
+
+
+def joueur_pronostique(prenom: str, player_id: int, correct: bool | None) -> dict[str, Any]:
+    return {"playerId": player_id, "prenom": prenom, "correct": correct}
+
+
+def pronostic_evalue(discord_id: str, nom: str | None = None, *, equipe: str | None = None,
+                     equipe_correct: bool | None = None, mvp=None, dofd=None) -> dict[str, Any]:
+    """`PronosticEvalue` du contrat : chaque `correct` arrive séparément (null tant qu'inconnu)."""
+    return {
+        "pronostiqueurDiscordId": discord_id,
+        "pronostiqueurNom": nom,
+        "equipeGagnante": None if equipe is None else {"equipe": equipe, "correct": equipe_correct},
+        "mvp": mvp,
+        "dofd": dofd,
+    }
+
+
+def game_pronostics(game_id: int = 1, game_number: int = 1, *, vainqueur_connu: bool = True,
+                    votes_clos: bool = False, pronostics=()) -> dict[str, Any]:
+    """`PronosticsDeLaGame` du contrat : vainqueur connu à la clôture de la Game,
+    MVP/DOFD connus à la clôture des votes."""
+    return {
+        "gameId": game_id,
+        "gameNumber": game_number,
+        "vainqueurConnu": vainqueur_connu,
+        "votesClos": votes_clos,
+        "pronostics": list(pronostics),
+    }
+
+
+class Voter(BaseModel):
+    """`VoterRequest` du contrat OpenAPI (tag Bot)."""
+
+    votantDiscordId: str
+    mvpPlayerId: int | None = None
+    dofdPlayerId: int | None = None
+
+
+@dataclass
+class ApiCall:
+    method: str
+    path: str
+    payload: Any
+    authorization: str | None
+
+
+class FakeShamelessApi:
+    """Fausse API Shameless : une vraie app FastAPI servie par un transport httpx.
+
+    Enregistre chaque appel (méthode, chemin, corps, Authorization) et applique la
+    sémantique des routes `/bot` : clé inconnue -> 401, `status` forcé -> ProblemDetails,
+    `PUT .../spectateurs` remplace l'ensemble, les pronostics (#16) / Série et Game sont
+    stockés, `PUT/GET .../votes` suit le contrat #15 (éligibilité, auto-vote, clôture) et
+    `POST /bot/clips` est idempotent sur `attachmentId` (201 au premier dépôt, 200 au
+    rejeu, vidéo non réécrite). `unreachable_transport()` simule une panne réseau, sans
+    serveur.
+    """
+
+    BASE_URL = "https://api.shameless.test"
+    BOT_TO_API_KEY = "test-bot-to-api-key"
+    # Types acceptés par l'API (#17, ClipsOptions.Formats) : c'est le contrat, recopié ici
+    # exprès (jamais importé du bot) pour qu'un test ne passe pas par construction.
+    VIDEO_TYPES = ("video/mp4", "video/webm", "video/quicktime")
+
+    def __init__(self, api_key: str = BOT_TO_API_KEY):
+        self.api_key = api_key
+        self.calls: list[ApiCall] = []
+        self.spectateurs: dict[int, list[str]] = {}
+        self.series_pronostics: dict[int, dict[str, Any]] = {}
+        self.pronostics: dict[int, dict[str, dict[str, Any]]] = {}  # series_id -> discord_id -> corps
+        self.game_pronostics: dict[int, dict[str, Any]] = {}
+        self.games: dict[int, dict[str, Any]] = {}          # game_id -> GameDuBot
+        self.votes: dict[int, dict[str, dict[str, Any]]] = {}  # game_id -> votant -> bulletin
+        self.vote_status: dict[int, str] = {}               # game_id -> a_venir|ouverts|clos
+        self.results: dict[int, dict[str, Any]] = {}        # game_id -> ResultatsDesVotes forcé
+        self.clips: dict[str, dict[str, Any]] = {}  # attachmentId -> ClipDuBot renvoyé
+        self.clip_files: dict[str, bytes] = {}  # attachmentId -> vidéo reçue
+        self.clip_game_id: int | None = None  # Game que l'API rattache (défaut : aucune)
+        self.clip_rattachement: str | None = None
+        self.status: int | None = None  # force la réponse (erreur API) ; None -> 200/201
+        self.transient_failures = 0  # nb de prochains dépôts de clip en panne réseau (503)
+        self.detail = "votes already closed"
+        self.app = self._build_app()
+
+    @property
+    def base_url(self) -> str:
+        return self.BASE_URL
+
+    @property
+    def transport(self) -> httpx.ASGITransport:
+        return httpx.ASGITransport(app=self.app)
+
+    def unreachable_transport(self) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused", request=request)
+
+        return httpx.MockTransport(handler)
+
+    def _players(self, game_id: int) -> list[dict[str, Any]]:
+        game = self.games.get(game_id) or {}
+        return [*game.get("teamA", []), *game.get("teamB", [])]
+
+    def _prenoms(self, game_id: int) -> dict[int, str]:
+        return {p["playerId"]: p.get("prenom") or "Joueur inconnu" for p in self._players(game_id)}
+
+    def _titre(self, game_id: int, field: str) -> dict[str, Any]:
+        """`ResultatDuTitre` à la clôture : décompte trié (voix desc, prénom) + tous les ex æquo."""
+        counts: dict[int, int] = {}
+        for bulletin in self.votes.get(game_id, {}).values():
+            player_id = bulletin.get(field)
+            if player_id is not None:
+                counts[player_id] = counts.get(player_id, 0) + 1
+        prenoms = self._prenoms(game_id)
+        decompte = sorted(
+            ({"playerId": pid, "prenom": prenoms.get(pid, "Joueur inconnu"), "voix": voix} for pid, voix in counts.items()),
+            key=lambda row: (-row["voix"], row["prenom"].lower(), row["playerId"]),
+        )
+        best = decompte[0]["voix"] if decompte else 0
+        return {"gagnants": [row["playerId"] for row in decompte if row["voix"] == best], "decompte": decompte}
+
+    def results_for(self, game_id: int) -> dict[str, Any]:
+        """`ResultatsDesVotes` : décompte et gagnants vides tant que le vote n'est pas clos."""
+        if game_id in self.results:
+            return self.results[game_id]
+        statut = self.vote_status.get(game_id, "ouverts")
+        bulletins = self.votes.get(game_id, {})
+        votants = sum(1 for b in bulletins.values() if b["mvpPlayerId"] is not None or b["dofdPlayerId"] is not None)
+        hidden = {"gagnants": [], "decompte": []}
+        titles = (
+            {titre: self._titre(game_id, f"{titre}PlayerId") for titre in ("mvp", "dofd")}
+            if statut == "clos"
+            else {titre: dict(hidden) for titre in ("mvp", "dofd")}
+        )
+        completed = (self.games.get(game_id) or {}).get("completedAt")
+        return {
+            "gameId": game_id,
+            "statut": statut,
+            "ouvertureLe": completed,
+            "fermetureLe": None,
+            "votants": votants,
+            **titles,
+        }
+
+    def _build_app(self) -> FastAPI:
+        app = FastAPI()
+        api = self
+
+        def record(request: Request, payload: Any = None) -> None:
+            api.calls.append(ApiCall(request.method, request.url.path, payload, request.headers.get("authorization")))
+
+        def guard(request: Request) -> None:
+            if request.headers.get("authorization") != f"Bearer {api.api_key}":
+                raise HTTPException(status_code=401, detail="invalid shameless api key")
+            if api.status is not None and api.status != 200:
+                raise HTTPException(status_code=api.status, detail=api.detail)
+
+        def _refuse(game_id: int) -> None:
+            if api.status is not None and api.status != 200:
+                raise HTTPException(status_code=api.status, detail=api.detail)
+            if game_id not in api.games and api.status is None:
+                raise HTTPException(status_code=404, detail="Cette game n'existe pas.")
+
+        @app.put("/bot/games/{game_id}/spectateurs")
+        async def put_spectateurs(game_id: int, request: Request, payload: PutSpectateurs):
+            record(request, payload.model_dump())
+            guard(request)
+            api.spectateurs[game_id] = list(payload.discordIds)  # remplace l'ensemble
+            return {"gameId": game_id, "discordIds": api.spectateurs[game_id]}
+
+        @app.get("/bot/series/{series_id}/pronostics")
+        async def get_series_pronostics(series_id: int, request: Request):
+            record(request)
+            guard(request)
+            if series_id not in api.series_pronostics:
+                raise HTTPException(status_code=404, detail="Cette Série n'existe pas.")
+            return api.series_pronostics[series_id]
+
+        @app.put("/bot/series/{series_id}/pronostics")
+        async def put_pronostic(series_id: int, request: Request, payload: PronostiquerRequest):
+            record(request, payload.model_dump())
+            guard(request)
+            api.pronostics.setdefault(series_id, {})[payload.pronostiqueurDiscordId] = payload.model_dump()
+            return {"seriesId": series_id, **payload.model_dump()}
+
+        @app.get("/bot/games/{game_id}/pronostics")
+        async def get_game_pronostics(game_id: int, request: Request):
+            record(request)
+            guard(request)
+            if game_id not in api.game_pronostics:
+                raise HTTPException(status_code=404, detail="Cette game n'existe pas.")
+            return api.game_pronostics[game_id]
+
+        @app.get("/bot/games/{game_id}")
+        async def get_game(game_id: int, request: Request):
+            authorization = request.headers.get("authorization")
+            api.calls.append(ApiCall("GET", request.url.path, None, authorization))
+            if authorization != f"Bearer {api.api_key}":
+                raise HTTPException(status_code=401, detail="invalid shameless api key")
+            if api.status is not None and api.status != 200:
+                raise HTTPException(status_code=api.status, detail=api.detail)
+            game = api.games.get(game_id)
+            if game is None:
+                raise HTTPException(status_code=404, detail="Cette game n'existe pas.")
+            return game
+
+        @app.put("/bot/games/{game_id}/votes")
+        async def put_votes(game_id: int, request: Request, payload: Voter):
+            authorization = request.headers.get("authorization")
+            api.calls.append(ApiCall("PUT", request.url.path, payload.model_dump(), authorization))
+            if authorization != f"Bearer {api.api_key}":
+                raise HTTPException(status_code=401, detail="invalid shameless api key")
+            _refuse(game_id)
+            statut = api.vote_status.get(game_id, "ouverts")
+            if statut == "a_venir":
+                raise HTTPException(status_code=409, detail="Les votes ouvrent à la fin de la game.")
+            if statut == "clos":
+                raise HTTPException(status_code=409, detail="Les votes de cette game sont clos.")
+            if not payload.votantDiscordId.isascii() or not payload.votantDiscordId.isdigit():
+                raise HTTPException(status_code=400, detail=f"« {payload.votantDiscordId} » n'est pas un ID Discord.")
+            joueurs = api._players(game_id)
+            joueurs_par_id = {p["playerId"]: p for p in joueurs}
+            lies = {str(p["discordId"]) for p in joueurs if p.get("discordId")}
+            eligibles = lies | set(api.spectateurs.get(game_id, []))
+            if payload.votantDiscordId not in eligibles:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Seuls les dix Joueurs de la game et les Spectateurs présents en vocal peuvent voter.",
+                )
+            for titre, player_id in (("MVP", payload.mvpPlayerId), ("DOFD", payload.dofdPlayerId)):
+                if player_id is None:
+                    continue
+                if player_id not in joueurs_par_id:
+                    raise HTTPException(status_code=400, detail=f"Le {titre} doit être l'un des dix Joueurs de la game.")
+                if str(joueurs_par_id[player_id].get("discordId")) == payload.votantDiscordId:
+                    raise HTTPException(status_code=400, detail=f"Tu ne peux pas voter pour toi-même ({titre}).")
+            api.votes.setdefault(game_id, {})[payload.votantDiscordId] = {
+                "mvpPlayerId": payload.mvpPlayerId,
+                "dofdPlayerId": payload.dofdPlayerId,
+            }
+            return {
+                "gameId": game_id,
+                "votantDiscordId": payload.votantDiscordId,
+                "mvpPlayerId": payload.mvpPlayerId,
+                "dofdPlayerId": payload.dofdPlayerId,
+            }
+
+        @app.get("/bot/games/{game_id}/votes")
+        async def get_votes(game_id: int, request: Request):
+            authorization = request.headers.get("authorization")
+            api.calls.append(ApiCall("GET", request.url.path, None, authorization))
+            if authorization != f"Bearer {api.api_key}":
+                raise HTTPException(status_code=401, detail="invalid shameless api key")
+            _refuse(game_id)
+            return api.results_for(game_id)
+
+        @app.post("/bot/clips")
+        async def post_clip(request: Request):
+            # multipart/form-data (ADR 0014) : tous les champs sont des textes, sauf la vidéo
+            form = await request.form()
+            fichier = form.get("fichier")
+            filename = getattr(fichier, "filename", None)
+            content_type = getattr(fichier, "content_type", None)
+            content = await fichier.read() if fichier is not None else b""
+            call = ApiCall(
+                "POST",
+                request.url.path,
+                {
+                    "messageId": form.get("messageId"),
+                    "attachmentId": form.get("attachmentId"),
+                    "auteurDiscordId": form.get("auteurDiscordId"),
+                    "auteurNom": form.get("auteurNom"),
+                    "publieLe": form.get("publieLe"),
+                    "fichier": {"filename": filename, "content_type": content_type, "content": content},
+                },
+                request.headers.get("authorization"),
+            )
+            api.calls.append(call)
+            if call.authorization != f"Bearer {api.api_key}":
+                raise HTTPException(status_code=401, detail="invalid shameless api key")
+            if api.transient_failures > 0:  # panne passagère : le dépôt peut être rejoué
+                api.transient_failures -= 1
+                raise HTTPException(status_code=503, detail="API Shameless momentanément indisponible.")
+            if api.status is not None and api.status != 200:
+                raise HTTPException(status_code=api.status, detail=api.detail)
+            if content_type not in api.VIDEO_TYPES:
+                raise HTTPException(status_code=400, detail="Un clip est une vidéo mp4, webm ou mov.")
+            attachment_id = str(form.get("attachmentId"))
+            replay = attachment_id in api.clips  # idempotent : le rejeu ne réécrit pas la vidéo
+            if not replay:
+                api.clip_files[attachment_id] = content
+                api.clips[attachment_id] = {
+                    "clipId": len(api.clips) + 1,
+                    "gameId": api.clip_game_id,
+                    "rattachement": api.clip_rattachement,
+                }
+            return JSONResponse(api.clips[attachment_id], status_code=200 if replay else 201)
+
+        return app
+
+
+# =========================
+# SHAMELESS CLIPS (#17) — vidéos du salon #clips
+# =========================
+
+CLIPS = 3003  # salon texte #clips (SHAMELESS_CLIPS_CHANNEL_ID)
+CLIP_FILE = b"\x00\x00\x00\x18ftypmp42" + b"faux clip" * 8  # petites charges utiles, jamais de vraie vidéo
+CLIP_TIME = datetime(2026, 10, 17, 20, 0, tzinfo=timezone.utc)
+
+
+def clip_attachment(
+    attachment_id: int = 7001,
+    *,
+    filename: str = "clip.mp4",
+    content_type: str | None = "video/mp4",
+    data: bytes = CLIP_FILE,
+    size: int | None = None,
+) -> FakeAttachment:
+    """Pièce jointe Discord prête à lire : `size` seul peut dépasser la limite sans contenu."""
+    return FakeAttachment(id=attachment_id, filename=filename, content_type=content_type, data=data, size=size)
+
+
+def clip_message(
+    channel,
+    *,
+    message_id: int = 9001,
+    author: FakeMember | None = None,
+    attachments=(),
+    created_at: datetime | None = None,
+    content: str | None = None,
+) -> FakeMessage:
+    """Message publié dans #clips : auteur humain et heure de publication par défaut."""
+    return FakeMessage(
+        channel=channel,
+        content=content,
+        id=message_id,
+        author=author or FakeMember(id=8001, name="Buster"),
+        attachments=list(attachments),
+        created_at=created_at or CLIP_TIME,
+    )
+
+
+async def load_clips(bot, settings, api=None, *, replay_delay_seconds=0.0):
+    """Le cog Clips tel que chargé au boot (listener on_message), client API injectable.
+
+    `replay_delay_seconds=0` en test : les rejeux du même `attachmentId` sont immédiats."""
+    cog = ShamelessClips(bot, settings, api=api, replay_delay_seconds=replay_delay_seconds)
+    await cog.cog_load()
+    return cog
 
 
 # =========================
