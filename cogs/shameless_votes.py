@@ -172,7 +172,12 @@ class ShamelessVotes(commands.Cog):
                 dofd_player_id=dofd_player_id,
             )
         except ShamelessApiError as error:
-            await self._reply(interaction, f"❌ Vote refusé : {error.detail or error}")
+            if error.is_permanent:
+                # 400/404/409 : refus définitif, le message de l'API explique pourquoi
+                await self._reply(interaction, f"❌ Vote refusé : {error.detail or error}")
+            else:
+                # réseau / 5xx / 401 : la panne se répare, on invite à réessayer (jamais « refusé »)
+                await self._reply(interaction, "⚠️ Vote non transmis : l'API Shameless est injoignable, réessaie dans un instant.")
             return
         await self._reply(
             interaction, "✅ Ton bulletin est enregistré. Tu peux le modifier jusqu'à la clôture du vote."

@@ -310,6 +310,22 @@ async def test_a_closed_window_is_shown_to_the_voter(
     assert fake_api.votes == {}
 
 
+async def test_a_transient_api_failure_invites_the_voter_to_retry_instead_of_a_refusal(
+    fake_bot, guild, shameless_settings, fake_api, make_client, post_event, game, clock
+):
+    _, view = await opened_vote(fake_bot, guild, shameless_settings, fake_api, make_client, post_event, clock)
+    fake_api.status = 503  # panne réseau/5xx : un retry peut réparer
+    voter = interaction(101)
+
+    await choose(view, mvp_custom_id(1), voter, ["13"])
+    await press(view, submit_custom_id(1), voter)
+
+    message = voter.response.messages[-1]["content"]
+    assert "réessaie" in message
+    assert "refusé" not in message  # jamais « refusé » pour une panne
+    assert fake_api.votes == {}
+
+
 # =========================
 # CLÔTURE ET ANNONCE
 # =========================
