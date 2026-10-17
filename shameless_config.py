@@ -30,3 +30,10 @@ class ShamelessSettings:
     team2_voice_id: int | None = None
     announce_channel_id: int | None = None
     web_url: str | None = None
+
+    # Bot -> API (dépôt des clips) : base de l'API (avec /api derrière le proxy) et clé Bearer
+    api_url: str | None = None
+    bot_to_api_key: str | None = None
+    clips_channel_id: int | None = None
+    # Taille max d'un clip, à aligner sur Clips:MaxFileSizeBytes côté Shameless (ADR 0014)
+    clips_max_bytes: int = 524_288_000

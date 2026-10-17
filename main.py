@@ -1,10 +1,13 @@
 import asyncio
+import copy
+import logging
 import os
 import sys
 import threading
 
 import discord
 import uvicorn
+from uvicorn.config import LOGGING_CONFIG
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -19,6 +22,7 @@ EXTENSIONS = [
     "commands.profile_pictures",
     "cogs.shameless_team_moves",
     "cogs.shameless_games",
+    "cogs.shameless_clips",
 ]
 
 
@@ -41,6 +45,16 @@ class MyBot(commands.Bot):
         await self.change_presence(activity=discord.Game(self.settings.discord.status))
 
 
+def uvicorn_log_config() -> dict:
+    """Logs d'uvicorn sur stdout et sans couleur, comme ceux du bot (voir main())."""
+    config = copy.deepcopy(LOGGING_CONFIG)
+    for formatter in config["formatters"].values():
+        formatter["use_colors"] = False
+    for handler in config["handlers"].values():
+        handler["stream"] = "ext://sys.stdout"
+    return config
+
+
 def run_internal_api(bot: MyBot, settings: BotSettings):
     app = create_internal_api(bot, settings)
     config = uvicorn.Config(
@@ -48,6 +62,7 @@ def run_internal_api(bot: MyBot, settings: BotSettings):
         host=settings.internal_api.host,
         port=settings.internal_api.port,
         log_level="info",
+        log_config=uvicorn_log_config(),
     )
     uvicorn.Server(config).run()
 
@@ -61,7 +76,13 @@ def main():
 
     bot = MyBot(settings)
     threading.Thread(target=run_internal_api, args=(bot, settings), daemon=True).start()
-    bot.run(settings.discord.token)
+    # INFO de tous les modules, pas que de discord ; stdout et sans codes couleur : les logs
+    # de conteneur ne sont pas un terminal (stderr s'afficherait en rouge)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    # httpx logge chaque URL, dont les liens signés du CDN Discord
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    bot.run(settings.discord.token, log_handler=handler, root_logger=True)
 
 
 if __name__ == "__main__":

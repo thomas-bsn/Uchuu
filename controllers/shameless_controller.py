@@ -83,6 +83,7 @@ async def receive_webhook(
         signature=x_shameless_signature,
         tolerance_seconds=settings.webhook_tolerance_seconds,
     ):
+        logger.warning("shameless webhook rejeté : signature invalide ou expirée")
         raise HTTPException(status_code=401, detail="invalid or expired signature")
 
     try:
@@ -95,6 +96,7 @@ async def receive_webhook(
     bot = request.app.state.bot
     handler = get_dispatcher(bot).handler_for(event.type)
     if handler is None:
+        logger.info("shameless webhook %s (%s) ignoré : pas de handler", event.event_id, event.type)
         return {"status": "ignored", "event_id": event.event_id}
 
     require_bot_ready(request)
@@ -104,6 +106,7 @@ async def receive_webhook(
     store = request.app.state.shameless_events_store
     claim = await asyncio.to_thread(store.claim, event.event_id, event.type, settings.claim_lease_seconds)
     if claim == DONE:
+        logger.info("shameless webhook %s (%s) déjà traité", event.event_id, event.type)
         return {"status": "duplicate", "event_id": event.event_id}
     if claim == IN_PROGRESS:
         raise HTTPException(status_code=409, detail="in_progress")
@@ -121,4 +124,5 @@ async def receive_webhook(
         raise HTTPException(status_code=500, detail="handler failed")
 
     await asyncio.to_thread(store.mark_done, event.event_id)
+    logger.info("shameless webhook %s (%s) traité", event.event_id, event.type)
     return {"status": "processed", "event_id": event.event_id}

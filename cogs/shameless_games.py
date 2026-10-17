@@ -34,6 +34,8 @@ class ShamelessGames(commands.Cog):
         dispatcher = get_dispatcher(self.bot)
         dispatcher.register(EVENT_GAME_STARTED, self.on_game_started)
         dispatcher.register(EVENT_GAME_COMPLETED, self.on_game_completed)
+        logger.info("shameless games : handlers game_started / game_completed enregistrés (annonces sur %s)",
+                    self.settings.announce_channel_id or "aucun salon configuré")
 
     async def cog_unload(self):
         dispatcher = get_dispatcher(self.bot)

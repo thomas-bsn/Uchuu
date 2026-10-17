@@ -104,3 +104,19 @@ def test_retired_shared_voice_setting_left_in_the_environment_is_ignored():
     settings = BotSettings.from_env({**REQUIRED, "SHAMELESS_SHARED_VOICE_ID": "not-a-number"})
 
     assert not hasattr(settings.shameless, "shared_voice_id")
+
+
+def test_clips_deposit_settings_are_optional_with_a_500_mb_default():
+    settings = BotSettings.from_env(REQUIRED).shameless
+    assert (settings.api_url, settings.bot_to_api_key, settings.clips_channel_id) == (None, None, None)
+    assert settings.clips_max_bytes == 524_288_000
+
+    configured = BotSettings.from_env({
+        **REQUIRED,
+        "SHAMELESS_API_URL": "https://shameless.example/api",
+        "SHAMELESS_BOT_TO_API_KEY": "key",
+        "SHAMELESS_CLIPS_CHANNEL_ID": "4000",
+        "SHAMELESS_CLIPS_MAX_BYTES": "1000",
+    }).shameless
+    assert (configured.api_url, configured.bot_to_api_key) == ("https://shameless.example/api", "key")
+    assert (configured.clips_channel_id, configured.clips_max_bytes) == (4000, 1000)

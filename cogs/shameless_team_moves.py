@@ -1,8 +1,13 @@
+import logging
+
 from discord.ext import commands
 
 from services.shameless_events import EVENT_TEAMS_FORMED, get_dispatcher
 from services.shameless_team_moves import make_teams_formed_handler
 from shameless_config import ShamelessSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ShamelessTeamMovesCog(commands.Cog):
@@ -14,6 +19,7 @@ class ShamelessTeamMovesCog(commands.Cog):
 
     async def cog_load(self):
         get_dispatcher(self.bot).register(EVENT_TEAMS_FORMED, make_teams_formed_handler(self.bot, self.settings))
+        logger.info("shameless team moves : handler teams_formed enregistré")
 
     async def cog_unload(self):
         get_dispatcher(self.bot).unregister(EVENT_TEAMS_FORMED)

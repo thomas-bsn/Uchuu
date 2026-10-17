@@ -16,9 +16,13 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux Team 1 / Team 2 (moves d'équipe). Il n'y a pas de vocal commun configuré : l'ancienne `SHAMELESS_SHARED_VOICE_ID` n'est plus lue (ignorée si encore présente). |
 | `SHAMELESS_ANNOUNCE_CHANNEL_ID` | Salon texte des annonces et récaps. |
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
+| `SHAMELESS_API_URL` | Adresse de l'API Shameless que le bot appelle (`/bot/…` y est ajouté). Derrière le proxy de Shameless : adresse publique **suivie de `/api`**. Requise pour le dépôt des clips. |
+| `SHAMELESS_BOT_TO_API_KEY` | Clé Bearer que le bot présente sur les routes `/bot/…` de l'API ; même valeur que `SHAMELESS_BOT_TO_API_KEY` côté Shameless. Distincte de `SHAMELESS_BOT_API_KEY` (sens inverse). |
+| `SHAMELESS_CLIPS_CHANNEL_ID` | Salon texte `#clips` dont les vidéos sont déposées sur l'API. Sans lui (ou sans `SHAMELESS_API_URL` / `SHAMELESS_BOT_TO_API_KEY`), aucun dépôt. |
+| `SHAMELESS_CLIPS_MAX_BYTES` | Taille max d'un clip en octets (défaut 524288000 = 500 Mo). **À garder égale** à la limite de l'API : au-delà, la vidéo est ignorée sans être téléchargée. |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
 
-Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), **le bot n'appelle jamais l'API Shameless**. Aucune URL d'API ni credential bot -> API n'est donc provisionné côté bot (pas de credential inutilisé). `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
+Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks). Le bot n'appelle l'API que pour **déposer les clips** (`POST /bot/clips`, section ci-dessous), avec `SHAMELESS_API_URL` et `SHAMELESS_BOT_TO_API_KEY`. `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
 
 Credentials : générez des valeurs aléatoires longues (par ex. `openssl rand -hex 32`), stockez-les dans l'env du bot et dans celle de l'API. Rotation = changer les deux env puis redémarrer, aucun changement de code.
 
@@ -149,6 +153,15 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 - **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Pas de vote MVP/DOFD (Phase 2).
 - Si l'envoi Discord échoue, le webhook répond 500 et le retry republie.
 - **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans **n'importe quel salon vocal du serveur `SHAMELESS_GUILD_ID`** (Team 1, Team 2 ou tout autre vocal ; présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Les vocaux des autres serveurs sont ignorés. Le bot doit avoir **View Channel** sur tous les vocaux à observer : un salon invisible pour lui n'est pas compté. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). Lecture (Phase 2) : `GameAttendanceStore(db_path).spectators(game_id)`.
+
+## Clips (`#clips`)
+
+Cog `cogs.shameless_clips`. Chaque message **humain** du salon `SHAMELESS_CLIPS_CHANNEL_ID` dont une pièce jointe est une vidéo (`video/mp4`, `video/webm`, `video/quicktime`) est téléchargé puis déposé sur `POST {SHAMELESS_API_URL}/bot/clips` (`multipart/form-data`, `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>`) : `fichier`, `messageId`, `attachmentId`, `auteurDiscordId`, `auteurNom`, `publieLe`. Contrat et rattachement à la Game : ADR 0014 du dépôt Shameless.
+
+- L'API conserve la vidéo (volume `api-clips`, à sauvegarder côté Shameless) ; le bot ne garde rien : le fichier passe par un temporaire supprimé après le dépôt.
+- Dépôt idempotent sur `attachmentId` (201 puis 200) : rejouer est sans risque.
+- Une vidéo plus grosse que `SHAMELESS_CLIPS_MAX_BYTES` est ignorée avant téléchargement (warning dans les logs).
+- Échec réseau ou 5xx : 3 tentatives (le fichier n'est téléchargé qu'une fois). 400 / 401 / 409 / 413 : abandon immédiat, loggé. Les tentatives vivent en mémoire : un clip dont le dépôt échoue ou posté pendant que le bot est arrêté n'est pas rejoué au redémarrage.
 
 ## Docker
 
