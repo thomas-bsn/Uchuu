@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from services.vote_gateway import MemberInfo, MessageRef
+from services.vote_types import MemberInfo, MessageRef
 
 VALIDATION_CHANNEL_ID = 20
 
@@ -35,6 +35,7 @@ class FakeVoteGateway:
     kicked: list[int] = field(default_factory=list)
     logs: list[str] = field(default_factory=list)
     validation_channel_available: bool = True
+    role_changes_fail: bool = False  # ex. Forbidden : hiérarchie de rôles, permission retirée
     _next_message_id: int = 500
 
     # --- monde ---
@@ -59,13 +60,13 @@ class FakeVoteGateway:
         return list(self.roster.values())
 
     async def add_role(self, member_id: int, role_id: int, reason: str) -> bool:
-        if member_id not in self.roster:
+        if member_id not in self.roster or self.role_changes_fail:
             return False
         self._set_roles(member_id, self.roles_of(member_id) | {role_id})
         return True
 
     async def remove_role(self, member_id: int, role_id: int, reason: str) -> bool:
-        if member_id not in self.roster:
+        if member_id not in self.roster or self.role_changes_fail:
             return False
         self._set_roles(member_id, self.roles_of(member_id) - {role_id})
         return True

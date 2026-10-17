@@ -39,7 +39,8 @@ async def test_the_vote_extension_reregisters_the_button_at_startup(bot_settings
 
 
 async def test_the_discord_gateway_logs_missing_server_and_channels_without_crashing(bot_settings):
-    from services.vote_gateway import DiscordVoteGateway, MessageRef
+    from services.vote_gateway import DiscordVoteGateway
+    from services.vote_types import MessageRef
     from tests.fakes import FakeBot
 
     bot = FakeBot()
