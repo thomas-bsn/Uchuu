@@ -99,6 +99,8 @@ class BotSettings:
                 pronostics_reconcile_seconds=env.float(
                     "SHAMELESS_PRONOSTICS_RECONCILE_SECONDS", ShamelessSettings.pronostics_reconcile_seconds
                 ),
+                clips_channel_id=env.optional_int("SHAMELESS_CLIPS_CHANNEL_ID"),
+                clips_max_bytes=env.int("SHAMELESS_CLIPS_MAX_BYTES", ShamelessSettings.clips_max_bytes),
             ),
         )
         env.raise_if_errors()

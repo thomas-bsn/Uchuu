@@ -38,3 +38,7 @@ class ShamelessSettings:
     # Intervalle de re-vérification des résultats de pronostics (MVP/DOFD après clôture
     # des votes). <= 0 : pas de boucle (les events et le démarrage suffisent).
     pronostics_reconcile_seconds: float = 60.0
+    # Salon des clips : absent = dépôt des vidéos désactivé
+    clips_channel_id: int | None = None
+    # Taille max d'une vidéo déposée : `Clips:MaxFileSizeBytes` côté API (500 Mo par défaut)
+    clips_max_bytes: int = 500 * 1024 * 1024
