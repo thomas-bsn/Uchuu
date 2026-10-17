@@ -17,6 +17,8 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_DB_PATH` | Fichier SQLite local (dédup webhooks, présences). En Docker : `/data/shameless.sqlite3`. |
 | `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux Team 1 / Team 2 (moves d'équipe). Il n'y a pas de vocal commun configuré : l'ancienne `SHAMELESS_SHARED_VOICE_ID` n'est plus lue (ignorée si encore présente). |
 | `SHAMELESS_ANNOUNCE_CHANNEL_ID` | Salon texte des annonces et récaps. |
+| `SHAMELESS_PRONOSTICS_CHANNEL_ID` | Salon texte des bulletins de pronostics (#16). Vide : la fonctionnalité est désactivée (aucun bulletin publié, aucun appel à l'API). |
+| `SHAMELESS_PRONOSTICS_RECONCILE_SECONDS` | Intervalle de re-vérification des résultats de pronostics (MVP/DOFD après clôture des votes, défaut 60). `<= 0` : pas de boucle — les événements et le redémarrage rattrapent. |
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
 
@@ -162,6 +164,35 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 - Échecs : panne réseau, `5xx`, `401` ou config (`SHAMELESS_API_URL`, `SHAMELESS_BOT_TO_API_KEY`) absente -> l'event n'est pas acquitté (`500`) et Shameless retente. `400`, `404` ou `409` (votes déjà clos) -> logués puis acquittés : retenter n'y changerait rien.
 - La clé ne figure jamais dans un message d'erreur ni dans un log. Lecture côté bot pour les tests : `ShamelessApiClient.put_spectateurs(game_id, discord_ids)` (`services/shameless_client.py`).
 
+## Pronostics (`teams_formed` / `game_started` / `game_completed`, #16)
+
+Avant chaque Game, les Spectateurs pronostiquent l'équipe gagnante, le MVP et le DOFD ; après la Game, le bot annonce les bonnes réponses. **Aucun point, aucun classement, aucun titre Doyen** n'est attribué : les pronostics sont seulement listés.
+
+Cog `cogs.shameless_pronostics`. Désactivé si `SHAMELESS_PRONOSTICS_CHANNEL_ID` est absent (aucun appel à l'API). Le dispatcher webhook chaîne plusieurs handlers par type d'event (`services.shameless_events.ShamelessEventDispatcher`) : #16 observe `teams_formed`, `game_started` et `game_completed` **sans remplacer** ceux de #4/#5.
+
+Cycle :
+
+1. `teams_formed` (Série créée) ou `game_completed` (Game suivante) : le bot lit `GET /bot/series/{id}/pronostics`. Si `gameNumber` est présent, il publie le bulletin (embed + menus) dans `SHAMELESS_PRONOSTICS_CHANNEL_ID`, **au plus une fois par (Série, n° de Game)**. `gameNumber` null (Game lancée / Série terminée) : rien n'est proposé.
+2. Le Spectateur choisit dans les menus : chaque choix met à jour son pronostic et le transmet aussitôt via `PUT /bot/series/{id}/pronostics` :
+
+   ```json
+   { "pronostiqueurDiscordId": "…", "pronostiqueurNom": "…", "gameNumber": 2,
+     "equipeGagnante": "A", "mvpPlayerId": 11, "dofdPlayerId": 21 }
+   ```
+
+   Tous les champs sont envoyés (`null` explicite). L'API **remplace** le pronostic entier ; les trois choix à `null` le retirent.
+3. `game_started` : verrou en SQLite (en plus du refus `409` de l'API). Une soumission après le lancement est refusée et expliquée en éphémère.
+4. `game_completed` : le bot lit `GET /bot/games/{id}/pronostics` et annonce **séparément** le vainqueur (dès `vainqueurConnu`), puis le MVP et le DOFD (dès `votesClos`, 10 min après la clôture). Chaque titre n'est annoncé qu'une fois par Game ; les Games en attente de résultat sont re-vérifiées par une boucle interne (intervalle `SHAMELESS_PRONOSTICS_RECONCILE_SECONDS`) et après redémarrage.
+
+Règles d'éligibilité et de validation (identiques au contrat, ADR 0013) :
+
+- **Tout compte Discord non lié à un Joueur de la composition courante** peut pronostiquer. Les `discordId` des dix Joueurs de `teamA`+`teamB` de l'aperçu sont exclus ; un Joueur est refusé côté bot **et** par l'API (`400`).
+- MVP/DOFD : uniquement un `playerId` de la composition courante. Vainqueur : `"A"` ou `"B"`. Un choix hors composition est refusé sans appel API.
+- Les erreurs `400`/`409` de l'API (game verrouillée, mauvais `gameNumber`, Joueur…) sont affichées au Spectateur telles que fournies par l'API.
+- Panne réseau / `5xx` / config manquante lors d'un handler : l'event n'est pas acquitté (`500`), Shameless retente. Payload non réparable (`404`, `series_id` non numérique) : logué puis acquitté.
+
+Lecteur côté bot pour les tests : `ShamelessApiClient.get_series_pronostics` / `put_pronostic` / `get_game_pronostics` (`services/shameless_client.py`).
+
 ## Docker
 
 ```sh
@@ -185,6 +216,7 @@ docker compose up -d --build
   L'intent `voice_states` (non privilégié) est indispensable.
 - Permissions serveur : **View Channel** sur **tous** les salons vocaux du serveur à observer (Picker et présences Spectateurs) ; **View Channel**, **Connect** et **Move Members** sur les salons Team 1 / Team 2.
 - Salon d'annonce (`SHAMELESS_ANNOUNCE_CHANNEL_ID`) : **Send Messages** et **Embed Links**.
+- Salon des pronostics (`SHAMELESS_PRONOSTICS_CHANNEL_ID`) : **Send Messages** et **Embed Links** ; le bot y publie un bulletin cliquable (menus d'interaction), il n'a besoin d'aucune permission spéciale pour recevoir les clics.
 
 ## Tests
 

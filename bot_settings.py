@@ -95,6 +95,10 @@ class BotSettings:
                 team2_voice_id=env.optional_int("SHAMELESS_TEAM2_VOICE_ID"),
                 announce_channel_id=env.optional_int("SHAMELESS_ANNOUNCE_CHANNEL_ID"),
                 web_url=env.optional_str("SHAMELESS_WEB_URL"),
+                pronostics_channel_id=env.optional_int("SHAMELESS_PRONOSTICS_CHANNEL_ID"),
+                pronostics_reconcile_seconds=env.float(
+                    "SHAMELESS_PRONOSTICS_RECONCILE_SECONDS", ShamelessSettings.pronostics_reconcile_seconds
+                ),
             ),
         )
         env.raise_if_errors()

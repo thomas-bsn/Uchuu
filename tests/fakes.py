@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from cogs.shameless_games import ShamelessGames
+from cogs.shameless_pronostics import ShamelessPronostics
 
 
 # =========================
@@ -37,6 +38,10 @@ class FakeMember:
         if self.voice_channel is None:
             return None
         return FakeVoiceState(channel=self.voice_channel)
+
+    @property
+    def display_name(self) -> str:
+        return self.name
 
     async def move_to(self, channel, *, reason: str | None = None):
         if self.voice_channel is not None:
@@ -82,6 +87,33 @@ class FakeMessage:
     channel: FakeTextChannel
     content: str | None
     kwargs: dict[str, Any]
+
+
+class FakeInteractionResponse:
+    """Ce que le handler appelle pour répondre à une interaction (éphémère)."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    async def send_message(self, content=None, **kwargs):
+        self.messages.append({"content": content, **kwargs})
+        return FakeMessage(channel=None, content=content, kwargs=kwargs)
+
+
+@dataclass(eq=False)
+class FakeInteraction:
+    """Interaction Discord : un membre qui clique, et sa réponse éphémère."""
+
+    user: FakeMember
+    response: FakeInteractionResponse = field(default_factory=FakeInteractionResponse)
+
+    @property
+    def replies(self) -> list[dict[str, Any]]:
+        return self.response.messages
+
+    @property
+    def content(self) -> str | None:
+        return self.replies[-1]["content"] if self.replies else None
 
 
 @dataclass(eq=False)
@@ -133,6 +165,10 @@ class FakeBot:
         self.guilds: list[FakeGuild] = list(guilds)
         self.runtime_loop = runtime_loop
         self.loop = runtime_loop
+        self.views: list = []  # vues persistantes enregistrées (add_view)
+
+    def add_view(self, view) -> None:
+        self.views.append(view)
 
     def add_guild(self, guild_id: int) -> FakeGuild:
         guild = FakeGuild(guild_id)
@@ -164,6 +200,7 @@ GUILD_ID = 1000
 SHARED, TEAM1, TEAM2, OTHER_VOICE = 2000, 2001, 2002, 2999  # SHARED : vocal quelconque, non configuré
 OTHER_GUILD_ID, FOREIGN_VOICE = 4000, 4001
 ANNOUNCE = 3000
+PRONOSTICS = 3001  # salon des bulletins de pronostics (#16)
 
 
 def team(name, side, players):
@@ -218,6 +255,17 @@ def game_completed(game_id="g-1", game_number=1, series_id="s-1", **overrides):
     return make_event("game_completed", data)
 
 
+def teams_formed(series_id="s-1", **extra):
+    data = {
+        "series_id": series_id,
+        "team_a": TEAM_A,
+        "team_b": TEAM_B,
+        "participant_discord_ids": PARTICIPANTS,
+        **extra,
+    }
+    return make_event("teams_formed", data)
+
+
 async def load_games(bot, settings, api=None):
     """Le cog tel que chargé au boot : cog_load enregistre ses handlers sur le dispatcher.
 
@@ -241,6 +289,16 @@ async def join(cog, member, channel):
     await cog.on_voice_state_update(member, before, after)
 
 
+async def load_pronostics(bot, settings, api=None):
+    """Cog Pronostics (#16) tel que chargé au boot : cog_load enregistre ses handlers.
+
+    `api` : client Shameless injecté (tests) ; None -> construit depuis la config.
+    """
+    cog = ShamelessPronostics(bot, settings, api=api)
+    await cog.cog_load()
+    return cog
+
+
 # =========================
 # SHAMELESS API FAKE (bot -> API)
 # =========================
@@ -249,6 +307,70 @@ class PutSpectateurs(BaseModel):
     """`SignalerSpectateursRequest` du contrat OpenAPI (tag Bot)."""
 
     discordIds: list[str]
+
+
+class PronostiquerRequest(BaseModel):
+    """`PronostiquerRequest` du contrat OpenAPI (tag Bot). Tous les champs sont requis."""
+
+    pronostiqueurDiscordId: str
+    pronostiqueurNom: str | None
+    gameNumber: int
+    equipeGagnante: str | None
+    mvpPlayerId: int | None
+    dofdPlayerId: int | None
+
+
+def bot_player(player_id: int, prenom: str, discord_id: str | None = None) -> dict[str, Any]:
+    """`JoueurDuBot` du contrat (playerId / prenom / discordId)."""
+    return {"playerId": player_id, "prenom": prenom, "discordId": discord_id}
+
+
+# Composition courante de la Série pour les tests : 5 Joueurs par équipe, IDs Discord liés 101..105 / 201..205
+COMPOSITION_A = [bot_player(11 + i, f"A{i + 1}", str(101 + i)) for i in range(5)]
+COMPOSITION_B = [bot_player(21 + i, f"B{i + 1}", str(201 + i)) for i in range(5)]
+COMPOSITION_PLAYER_IDS = {p["playerId"] for p in COMPOSITION_A + COMPOSITION_B}
+COMPOSITION_DISCORD_IDS = {p["discordId"] for p in COMPOSITION_A + COMPOSITION_B}
+
+
+def series_pronostics(series_id: int = 1, game_number: int | None = 1, best_of: int = 3,
+                      team_a=None, team_b=None) -> dict[str, Any]:
+    """`PronosticsDeLaSerie` du contrat : la Game ouverte (gameNumber null = verrouillé)."""
+    return {
+        "seriesId": series_id,
+        "bestOf": best_of,
+        "gameNumber": game_number,
+        "teamA": list(COMPOSITION_A if team_a is None else team_a),
+        "teamB": list(COMPOSITION_B if team_b is None else team_b),
+    }
+
+
+def joueur_pronostique(prenom: str, player_id: int, correct: bool | None) -> dict[str, Any]:
+    return {"playerId": player_id, "prenom": prenom, "correct": correct}
+
+
+def pronostic_evalue(discord_id: str, nom: str | None = None, *, equipe: str | None = None,
+                     equipe_correct: bool | None = None, mvp=None, dofd=None) -> dict[str, Any]:
+    """`PronosticEvalue` du contrat : chaque `correct` arrive séparément (null tant qu'inconnu)."""
+    return {
+        "pronostiqueurDiscordId": discord_id,
+        "pronostiqueurNom": nom,
+        "equipeGagnante": None if equipe is None else {"equipe": equipe, "correct": equipe_correct},
+        "mvp": mvp,
+        "dofd": dofd,
+    }
+
+
+def game_pronostics(game_id: int = 1, game_number: int = 1, *, vainqueur_connu: bool = True,
+                    votes_clos: bool = False, pronostics=()) -> dict[str, Any]:
+    """`PronosticsDeLaGame` du contrat : vainqueur connu à la clôture de la Game,
+    MVP/DOFD connus à la clôture des votes."""
+    return {
+        "gameId": game_id,
+        "gameNumber": game_number,
+        "vainqueurConnu": vainqueur_connu,
+        "votesClos": votes_clos,
+        "pronostics": list(pronostics),
+    }
 
 
 @dataclass
@@ -264,8 +386,8 @@ class FakeShamelessApi:
 
     Enregistre chaque appel (méthode, chemin, corps, Authorization) et applique la
     sémantique des routes `/bot` : clé inconnue -> 401, `status` forcé -> ProblemDetails,
-    `PUT .../spectateurs` remplace l'ensemble. `unreachable_transport()` simule une panne
-    réseau, sans serveur.
+    `PUT .../spectateurs` remplace l'ensemble, les pronostics (#16) / Série et Game sont
+    stockés. `unreachable_transport()` simule une panne réseau, sans serveur.
     """
 
     BASE_URL = "https://api.shameless.test"
@@ -275,6 +397,9 @@ class FakeShamelessApi:
         self.api_key = api_key
         self.calls: list[ApiCall] = []
         self.spectateurs: dict[int, list[str]] = {}
+        self.series_pronostics: dict[int, dict[str, Any]] = {}
+        self.pronostics: dict[int, dict[str, dict[str, Any]]] = {}  # series_id -> discord_id -> corps
+        self.game_pronostics: dict[int, dict[str, Any]] = {}
         self.status: int | None = None  # force la réponse (erreur API) ; None -> 200
         self.detail = "votes already closed"
         self.app = self._build_app()
@@ -297,16 +422,44 @@ class FakeShamelessApi:
         app = FastAPI()
         api = self
 
-        @app.put("/bot/games/{game_id}/spectateurs")
-        async def put_spectateurs(game_id: int, request: Request, payload: PutSpectateurs):
-            authorization = request.headers.get("authorization")
-            api.calls.append(ApiCall("PUT", request.url.path, payload.model_dump(), authorization))
-            if authorization != f"Bearer {api.api_key}":
+        def record(request: Request, payload: Any = None) -> None:
+            api.calls.append(ApiCall(request.method, request.url.path, payload, request.headers.get("authorization")))
+
+        def guard(request: Request) -> None:
+            if request.headers.get("authorization") != f"Bearer {api.api_key}":
                 raise HTTPException(status_code=401, detail="invalid shameless api key")
             if api.status is not None and api.status != 200:
                 raise HTTPException(status_code=api.status, detail=api.detail)
+
+        @app.put("/bot/games/{game_id}/spectateurs")
+        async def put_spectateurs(game_id: int, request: Request, payload: PutSpectateurs):
+            record(request, payload.model_dump())
+            guard(request)
             api.spectateurs[game_id] = list(payload.discordIds)  # remplace l'ensemble
             return {"gameId": game_id, "discordIds": api.spectateurs[game_id]}
+
+        @app.get("/bot/series/{series_id}/pronostics")
+        async def get_series_pronostics(series_id: int, request: Request):
+            record(request)
+            guard(request)
+            if series_id not in api.series_pronostics:
+                raise HTTPException(status_code=404, detail="Cette Série n'existe pas.")
+            return api.series_pronostics[series_id]
+
+        @app.put("/bot/series/{series_id}/pronostics")
+        async def put_pronostic(series_id: int, request: Request, payload: PronostiquerRequest):
+            record(request, payload.model_dump())
+            guard(request)
+            api.pronostics.setdefault(series_id, {})[payload.pronostiqueurDiscordId] = payload.model_dump()
+            return {"seriesId": series_id, **payload.model_dump()}
+
+        @app.get("/bot/games/{game_id}/pronostics")
+        async def get_game_pronostics(game_id: int, request: Request):
+            record(request)
+            guard(request)
+            if game_id not in api.game_pronostics:
+                raise HTTPException(status_code=404, detail="Cette game n'existe pas.")
+            return api.game_pronostics[game_id]
 
         return app
 

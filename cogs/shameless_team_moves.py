@@ -11,12 +11,14 @@ class ShamelessTeamMovesCog(commands.Cog):
     def __init__(self, bot, settings: ShamelessSettings):
         self.bot = bot
         self.settings = settings
+        self._handler = None
 
     async def cog_load(self):
-        get_dispatcher(self.bot).register(EVENT_TEAMS_FORMED, make_teams_formed_handler(self.bot, self.settings))
+        self._handler = make_teams_formed_handler(self.bot, self.settings)
+        get_dispatcher(self.bot).register(EVENT_TEAMS_FORMED, self._handler)
 
     async def cog_unload(self):
-        get_dispatcher(self.bot).unregister(EVENT_TEAMS_FORMED)
+        get_dispatcher(self.bot).unregister(EVENT_TEAMS_FORMED, self._handler)
 
 
 async def setup(bot):

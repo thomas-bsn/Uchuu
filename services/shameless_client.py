@@ -68,6 +68,45 @@ class ShamelessApiClient:
             json={"discordIds": sorted(set(discord_ids))},
         )
 
+    async def get_series_pronostics(self, series_id: int) -> dict[str, Any]:
+        """`GET /bot/series/{id}/pronostics` : la Game ouverte (`gameNumber` null si
+        verrouillée / Série terminée) et la composition courante."""
+        response = await self._request("GET", f"/bot/series/{series_id}/pronostics")
+        return response.json()
+
+    async def put_pronostic(
+        self,
+        series_id: int,
+        *,
+        discord_id: str,
+        nom: str | None,
+        game_number: int,
+        equipe_gagnante: str | None = None,
+        mvp_player_id: int | None = None,
+        dofd_player_id: int | None = None,
+    ) -> dict[str, Any]:
+        """`PUT /bot/series/{id}/pronostics` : remplace le pronostic du Spectateur (les
+        trois choix à `null` le retirent). Tous les champs du contrat sont envoyés."""
+        response = await self._request(
+            "PUT",
+            f"/bot/series/{series_id}/pronostics",
+            json={
+                "pronostiqueurDiscordId": str(discord_id),
+                "pronostiqueurNom": nom,
+                "gameNumber": game_number,
+                "equipeGagnante": equipe_gagnante,
+                "mvpPlayerId": mvp_player_id,
+                "dofdPlayerId": dofd_player_id,
+            },
+        )
+        return response.json()
+
+    async def get_game_pronostics(self, game_id: int) -> dict[str, Any]:
+        """`GET /bot/games/{id}/pronostics` : les pronostics évalués d'une Game (chaque
+        `correct` arrive quand son résultat est connu)."""
+        response = await self._request("GET", f"/bot/games/{game_id}/pronostics")
+        return response.json()
+
     async def _request(self, method: str, path: str, *, json: Any = None) -> httpx.Response:
         if not path.startswith("/bot/"):
             # ADR 0013 : la clé machine n'ouvre QUE les routes du bot — jamais ailleurs

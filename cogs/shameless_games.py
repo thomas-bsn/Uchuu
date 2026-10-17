@@ -42,8 +42,8 @@ class ShamelessGames(commands.Cog):
 
     async def cog_unload(self):
         dispatcher = get_dispatcher(self.bot)
-        dispatcher.unregister(EVENT_GAME_STARTED)
-        dispatcher.unregister(EVENT_GAME_COMPLETED)
+        dispatcher.unregister(EVENT_GAME_STARTED, self.on_game_started)
+        dispatcher.unregister(EVENT_GAME_COMPLETED, self.on_game_completed)
         if self._api is not None:
             await self._api.aclose()
 

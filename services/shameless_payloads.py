@@ -78,7 +78,16 @@ def linked_discord_ids(team: dict[str, Any]) -> list[int]:
 def game_id_of(data: dict[str, Any]) -> int | None:
     """`game_id` du contrat (identifiant numérique en texte) -> int. None si absent ou
     invalide : la Game n'est alors pas adressable sur `/bot/games/{id}`, inutile de retenter."""
-    raw = data.get("game_id")
+    return _positive_int(data.get("game_id"))
+
+
+def series_id_of(data: dict[str, Any]) -> int | None:
+    """`series_id` du contrat (identifiant numérique) -> int. None si absent ou invalide :
+    la Série n'est alors pas adressable sur `/bot/series/{id}`, inutile de retenter."""
+    return _positive_int(data.get("series_id"))
+
+
+def _positive_int(raw: Any) -> int | None:
     if isinstance(raw, bool) or raw is None:
         return None
     text = decimal_text(raw)

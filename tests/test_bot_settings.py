@@ -125,3 +125,23 @@ def test_retired_shared_voice_setting_left_in_the_environment_is_ignored():
     settings = BotSettings.from_env({**REQUIRED, "SHAMELESS_SHARED_VOICE_ID": "not-a-number"})
 
     assert not hasattr(settings.shameless, "shared_voice_id")
+
+
+def test_shameless_pronostics_config_is_read_from_the_environment():
+    # #16 : salon des bulletins de pronostics + intervalle de réconciliation des résultats
+    settings = BotSettings.from_env({
+        **REQUIRED,
+        "SHAMELESS_PRONOSTICS_CHANNEL_ID": "3001",
+        "SHAMELESS_PRONOSTICS_RECONCILE_SECONDS": "15",
+    })
+
+    assert settings.shameless.pronostics_channel_id == 3001
+    assert settings.shameless.pronostics_reconcile_seconds == 15.0
+
+
+def test_shameless_pronostics_config_is_optional():
+    # salon absent -> fonctionnalité éteinte (pas de refus au démarrage)
+    settings = BotSettings.from_env(REQUIRED)
+
+    assert settings.shameless.pronostics_channel_id is None
+    assert settings.shameless.pronostics_reconcile_seconds == 60.0

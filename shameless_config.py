@@ -33,3 +33,8 @@ class ShamelessSettings:
     team2_voice_id: int | None = None
     announce_channel_id: int | None = None
     web_url: str | None = None
+    # #16 : salon des bulletins de pronostics. Vide -> la fonctionnalité est désactivée.
+    pronostics_channel_id: int | None = None
+    # Intervalle de re-vérification des résultats de pronostics (MVP/DOFD après clôture
+    # des votes). <= 0 : pas de boucle (les events et le démarrage suffisent).
+    pronostics_reconcile_seconds: float = 60.0
