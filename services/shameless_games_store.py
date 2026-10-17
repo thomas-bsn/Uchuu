@@ -1,13 +1,13 @@
 """SQLite des Games Shameless (#5) : messages déjà publiés + présences par Game.
 
-Même fichier que la dédup webhook (shameless_store.connect) ; tables propres à ce module.
+Même fichier que la dédup webhook (sqlite_store.connect) ; tables propres à ce module.
 """
 from __future__ import annotations
 
 import json
 import time
 
-from services.shameless_store import SqliteStore
+from services.sqlite_store import SqliteStore
 
 # Types de messages publiés (clé = series_id / game_id)
 POST_SERIES_ANNOUNCE = "series_announce"

@@ -36,7 +36,7 @@ def require_bot_ready(request: Request):
 
 def require_shameless_api(request: Request, authorization: str | None = Header(default=None)):
     # Identité machine de l'API Shameless; le navigateur ne voit jamais ce credential
-    expected = request.app.state.shameless_settings.bot_api_key
+    expected = request.app.state.settings.shameless.bot_api_key
     scheme, _, token = (authorization or "").partition(" ")
     if not expected or scheme != "Bearer" or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="invalid shameless api key")
@@ -45,7 +45,7 @@ def require_shameless_api(request: Request, authorization: str | None = Header(d
 @router.get("/voice-candidates", dependencies=[Depends(require_shameless_api), Depends(require_bot_ready)])
 async def get_voice_candidates(request: Request):
     bot = request.app.state.bot
-    guild_id = request.app.state.shameless_settings.guild_id
+    guild_id = request.app.state.settings.shameless.guild_id
 
     async def _lookup():
         # lecture du cache discord.py sur la loop du bot
@@ -70,7 +70,7 @@ async def receive_webhook(
     x_shameless_timestamp: str | None = Header(default=None),
     x_shameless_signature: str | None = Header(default=None),
 ):
-    settings = request.app.state.shameless_settings
+    settings = request.app.state.settings.shameless
     if not settings.webhook_secret:
         raise HTTPException(status_code=503, detail="webhook not configured")
 

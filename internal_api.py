@@ -14,6 +14,5 @@ def create_internal_api(bot, settings: BotSettings):
     app.state.bot = bot
     app.state.bot_loop = bot.loop
     app.state.settings = settings
-    app.state.shameless_settings = settings.shameless
     app.state.shameless_events_store = ProcessedEventStore(settings.shameless.db_path)
     return app

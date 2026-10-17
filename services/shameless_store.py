@@ -1,38 +1,13 @@
 """Persistance SQLite locale de l'intégration Shameless.
 
-`SqliteStore` est la base partagée : même fichier pour la dédup webhook et les tables
-des Games (#5), chaque store crée ses propres tables. Connexions courtes (une par
-opération), sûres entre le thread uvicorn, celui du bot et `asyncio.to_thread`.
+Même fichier pour la dédup webhook et les tables des Games (#5) ; chaque store crée
+ses propres tables sur la base partagée `services.sqlite_store.SqliteStore`.
 """
 from __future__ import annotations
 
-import sqlite3
 import time
-from contextlib import closing
-from pathlib import Path
 
-
-def connect(db_path: str) -> sqlite3.Connection:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=10, isolation_level=None)  # autocommit
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
-
-
-class SqliteStore:
-    """Base des stores Shameless : `SCHEMA` exécuté à l'init, `_conn()` fermée en sortie de with."""
-
-    SCHEMA: tuple[str, ...] = ()
-
-    def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
-        with self._conn() as conn:
-            for statement in self.SCHEMA:
-                conn.execute(statement)
-
-    def _conn(self):
-        return closing(connect(self.db_path))
-
+from services.sqlite_store import SqliteStore
 
 # Résultats de ProcessedEventStore.claim()
 CLAIMED = "claimed"          # à nous d'exécuter le handler
