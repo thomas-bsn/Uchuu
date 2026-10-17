@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from bot_settings import CommunityIds, VoteSettings
 from services.vote import mentions
-from services.vote_gateway import MemberInfo, VoteGateway
+from services.vote_gateway import VoteGateway
 from services.vote_store import VoteRecord
+from services.vote_types import MemberInfo, VoteKind
 
 DAY_SECONDS = 24 * 3600
 
@@ -14,19 +15,45 @@ KICK_DM_MESSAGE = (
     "Serveur privé à intérêt commun."
 )
 
-INVITE_VOTE_TEMPLATE = (
-    "🔐 **Nouvel invité**\n\n"
-    "Utilisateur : {user}\n"
+VOTE_TEMPLATE = (
+    "🔐 **{title}**\n\n"
+    "{label} : {user}\n"
     "Votes : {current}/{required}\n"
     "Expiration : <t:{expires_at}:R>\n\n"
     "**Rôle Confiance** : {confiance}"
 )
 
 
-class InvitePolicy:
+def voters_line(vote: VoteRecord) -> str:
+    """Ligne des votants, commune à tous les logs de vote."""
+    return f"👍 Pour ({len(vote.approvers)}) : {mentions(vote.approvers)}"
+
+
+class _RenderedPolicy:
+    """Rendu commun des messages de vote ; chaque politique fournit son titre et son libellé."""
+
+    title: str
+    target_label: str
+    ids: CommunityIds
+
+    def render(self, vote: VoteRecord, approvals_required: int) -> str:
+        return VOTE_TEMPLATE.format(
+            title=self.title,
+            label=self.target_label,
+            user=f"<@{vote.target_id}>",
+            current=len(vote.approvers),
+            required=approvals_required,
+            expires_at=int(vote.expires_at),
+            confiance=f"<@&{self.ids.role_confiance_id}>",
+        )
+
+
+class InvitePolicy(_RenderedPolicy):
     """Invité → Membre : rôle Invité à l'ouverture, Membre au quorum, DM + kick à l'expiration."""
 
-    kind = "invite"
+    kind = VoteKind.INVITE
+    title = "Nouvel invité"
+    target_label = "Utilisateur"
 
     def __init__(self, ids: CommunityIds, votes: VoteSettings) -> None:
         self.ids = ids
@@ -35,15 +62,6 @@ class InvitePolicy:
     async def on_open(self, gateway: VoteGateway, target_id: int) -> bool:
         return await gateway.add_role(target_id, self.ids.role_invite_id, "Nouvel arrivant : vote d'admission")
 
-    def render(self, vote: VoteRecord, approvals_required: int) -> str:
-        return INVITE_VOTE_TEMPLATE.format(
-            user=f"<@{vote.target_id}>",
-            current=len(vote.approvers),
-            required=approvals_required,
-            expires_at=int(vote.expires_at),
-            confiance=f"<@&{self.ids.role_confiance_id}>",
-        )
-
     async def on_approved(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id
         await gateway.remove_role(target, self.ids.role_invite_id, "Admission approuvée")
@@ -51,12 +69,12 @@ class InvitePolicy:
         return (
             "✅ **Admission approuvée**\n"
             f"👤 Utilisateur : <@{target}> ({target})\n"
-            f"👍 Pour ({len(vote.approvers)}) : {mentions(vote.approvers)}"
+            f"{voters_line(vote)}"
         )
 
     async def on_expired(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id
-        voters = f"👍 Pour ({len(vote.approvers)}) : {mentions(vote.approvers)}"
+        voters = voters_line(vote)
         member = await gateway.member(target)
         if member is None:
             return f"⏱️ **Vote d'admission expiré** — <@{target}> ({target}) a déjà quitté le serveur.\n{voters}"
@@ -71,20 +89,13 @@ class InvitePolicy:
         return f"⏱️ **{status}**\n👤 Utilisateur : <@{target}> ({target})\n{voters}"
 
 
-CONFIANCE_VOTE_TEMPLATE = (
-    "🔐 **Promotion Confiance**\n\n"
-    "Membre : {user}\n"
-    "Votes : {current}/{required}\n"
-    "Expiration : <t:{expires_at}:R>\n\n"
-    "**Rôle Confiance** : {confiance}"
-)
-
-
-class ConfiancePolicy:
+class ConfiancePolicy(_RenderedPolicy):
     """Membre → Confiance : candidats proposés par le scan, rôle Confiance au quorum,
     rien à l'expiration (le cooldown démarre)."""
 
-    kind = "confiance"
+    kind = VoteKind.CONFIANCE
+    title = "Promotion Confiance"
+    target_label = "Membre"
 
     def __init__(self, ids: CommunityIds, votes: VoteSettings) -> None:
         self.ids = ids
@@ -102,22 +113,13 @@ class ConfiancePolicy:
     async def on_open(self, gateway: VoteGateway, target_id: int) -> bool:
         return True
 
-    def render(self, vote: VoteRecord, approvals_required: int) -> str:
-        return CONFIANCE_VOTE_TEMPLATE.format(
-            user=f"<@{vote.target_id}>",
-            current=len(vote.approvers),
-            required=approvals_required,
-            expires_at=int(vote.expires_at),
-            confiance=f"<@&{self.ids.role_confiance_id}>",
-        )
-
     async def on_approved(self, gateway: VoteGateway, vote: VoteRecord) -> str:
         target = vote.target_id
         await gateway.add_role(target, self.ids.role_confiance_id, "Promotion Confiance approuvée")
         return (
             "🎉 **Promotion Confiance approuvée**\n"
             f"👤 Membre : <@{target}> ({target})\n"
-            f"👍 Pour ({len(vote.approvers)}) : {mentions(vote.approvers)}"
+            f"{voters_line(vote)}"
         )
 
     async def on_expired(self, gateway: VoteGateway, vote: VoteRecord) -> str:
@@ -125,5 +127,5 @@ class ConfiancePolicy:
         return (
             f"⏱️ **Promotion Confiance non obtenue** — <@{target}> ({target}) reste Membre "
             f"(nouvelle proposition possible après le cooldown).\n"
-            f"👍 Pour ({len(vote.approvers)}) : {mentions(vote.approvers)}"
+            f"{voters_line(vote)}"
         )
