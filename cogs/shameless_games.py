@@ -2,8 +2,9 @@
 
 Handlers branchés sur le dispatcher webhook de #2 (game_started / game_completed).
 Présences (US 24) : entre game_started et game_completed d'une Game, on note les humains
-vus dans les salons vocaux commun / Team 1 / Team 2, hors Joueurs de la Game. Tout est
-dans SQLite -> un redémarrage en pleine Game reprend la fenêtre ouverte.
+vus dans n'importe quel salon vocal du serveur Shameless (SHAMELESS_GUILD_ID), hors Joueurs
+de la Game et hors bots. Tout est dans SQLite -> un redémarrage en pleine Game reprend la
+fenêtre ouverte.
 SQLite est appelé via asyncio.to_thread : jamais d'I/O bloquante sur la boucle du bot.
 """
 from __future__ import annotations
@@ -80,7 +81,9 @@ class ShamelessGames(commands.Cog):
         # mute / deafen / stream : même salon -> rien à noter
         if channel is None or channel == getattr(before, "channel", None):
             return
-        if member.bot or channel.id not in self._voice_ids():
+        # filtre en mémoire, avant tout accès SQLite : seuls les vocaux du serveur configuré
+        guild = getattr(channel, "guild", None)
+        if member.bot or guild is None or guild.id != self.settings.guild_id:
             return
         await asyncio.to_thread(self._record_everywhere, str(member.id))
 
@@ -100,18 +103,17 @@ class ShamelessGames(commands.Cog):
     # HELPERS
     # =========================
 
-    def _voice_ids(self) -> set[int]:
-        s = self.settings
-        return {i for i in (s.shared_voice_id, s.team1_voice_id, s.team2_voice_id) if i is not None}
+    def _voice_channels(self) -> list:
+        """Tous les salons vocaux (et Stages) du serveur Shameless configuré."""
+        guild_id = self.settings.guild_id
+        guild = self.bot.get_guild(guild_id) if guild_id is not None else None
+        if guild is None:
+            return []
+        return [*guild.voice_channels, *getattr(guild, "stage_channels", ())]
 
     async def _snapshot(self, windows: dict[str, set[str]]) -> None:
-        """Note les humains actuellement dans les salons configurés pour ces Games."""
-        present = set()
-        for channel_id in self._voice_ids():
-            channel = self.bot.get_channel(channel_id)
-            if channel is None:
-                continue
-            present |= {str(m.id) for m in channel.members if not m.bot}
+        """Note les humains actuellement dans un vocal du serveur pour ces Games."""
+        present = {str(m.id) for c in self._voice_channels() for m in c.members if not m.bot}
 
         def _record():
             for game_id, participants in windows.items():

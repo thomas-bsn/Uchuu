@@ -26,7 +26,6 @@ class ShamelessSettings:
     # Clé des requêtes authentifiées API -> bot (voice candidates)
     bot_api_key: str | None = None
     guild_id: int | None = None
-    shared_voice_id: int | None = None
     team1_voice_id: int | None = None
     team2_voice_id: int | None = None
     announce_channel_id: int | None = None
