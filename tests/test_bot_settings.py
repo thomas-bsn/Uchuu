@@ -99,6 +99,27 @@ def test_settings_are_immutable():
         settings.internal_api.port = 1
 
 
+def test_shameless_api_config_is_read_from_the_environment():
+    # #14 : le bot appelle l'API Shameless (routes /bot) avec une clé dédiée
+    settings = BotSettings.from_env({
+        **REQUIRED,
+        "SHAMELESS_API_URL": "https://shameless.example/api",
+        "SHAMELESS_BOT_TO_API_KEY": "to-api-key",
+    })
+
+    assert settings.shameless.api_url == "https://shameless.example/api"
+    assert settings.shameless.bot_to_api_key == "to-api-key"
+
+
+def test_shameless_api_config_is_optional():
+    # comme les autres secrets Shameless : absence != démarrage refusé (une transmission
+    # tentée sans config échoue à l'exécution, pas au boot)
+    settings = BotSettings.from_env(REQUIRED)
+
+    assert settings.shameless.api_url is None
+    assert settings.shameless.bot_to_api_key is None
+
+
 def test_retired_shared_voice_setting_left_in_the_environment_is_ignored():
     # #18 : les présences couvrent tous les vocaux du serveur, il n'y a plus de vocal commun
     settings = BotSettings.from_env({**REQUIRED, "SHAMELESS_SHARED_VOICE_ID": "not-a-number"})

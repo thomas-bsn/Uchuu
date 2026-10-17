@@ -8,6 +8,8 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | --- | --- |
 | `SHAMELESS_GUILD_ID` | Serveur Discord de l'Instance. C'est le seul serveur inspecté. |
 | `SHAMELESS_BOT_API_KEY` | Credential de l'identité machine de l'API Shameless pour appeler le bot. Vide = toutes les requêtes sont refusées. Distinct du secret webhook. |
+| `SHAMELESS_API_URL` | URL de l'API Shameless, appelée par le bot sur les routes `/bot/...` (ex. `https://shameless.example`). Vide : la transmission échoue à l'exécution — l'event n'est pas acquitté et Shameless retente une fois la config corrigée. |
+| `SHAMELESS_BOT_TO_API_KEY` | Credential de l'identité machine du bot pour appeler l'API Shameless (`Authorization: Bearer`). Même nom et même valeur que l'env `SHAMELESS_BOT_TO_API_KEY` de l'API (`Bot:ApiKey`, ADR 0013) ; distinct des deux précédents. Vide : la transmission échoue à l'exécution (même comportement que ci-dessus). |
 | `SHAMELESS_WEBHOOK_SECRET` | Secret HMAC partagé avec l'API pour signer les webhooks API -> bot. Vide = le callback répond 503. |
 | `SHAMELESS_WEBHOOK_TOLERANCE_SECONDS` | Écart max accepté entre `X-Shameless-Timestamp` et l'horloge du bot (défaut 300). |
 | `SHAMELESS_HANDLER_TIMEOUT_SECONDS` | Délai max d'un handler Discord avant réponse 504 (défaut 30). |
@@ -18,7 +20,7 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
 
-Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), **le bot n'appelle jamais l'API Shameless**. Aucune URL d'API ni credential bot -> API n'est donc provisionné côté bot (pas de credential inutilisé). `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
+Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), et **le bot appelle aussi l'API** sur les routes `/bot/…` (présences des Spectateurs, puis votes, pronostics et clips en Phase 2) avec `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>` et `SHAMELESS_API_URL`. Le bot n'a pas le credential inverse (`SHAMELESS_BOT_API_KEY`) dans ce sens : les deux clés sont distinctes. `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
 
 Credentials : générez des valeurs aléatoires longues (par ex. `openssl rand -hex 32`), stockez-les dans l'env du bot et dans celle de l'API. Rotation = changer les deux env puis redémarrer, aucun changement de code.
 
@@ -148,7 +150,17 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 - **Annonce de Série** : au premier `game_started` reçu pour un `series_id` (normalement la Game n°1, mais aussi une Game suivante si celui de la Game 1 a été raté), une seule fois par `series_id`, même si l'API republie avec un autre `event_id` ou après redémarrage.
 - **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Pas de vote MVP/DOFD (Phase 2).
 - Si l'envoi Discord échoue, le webhook répond 500 et le retry republie.
-- **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans **n'importe quel salon vocal du serveur `SHAMELESS_GUILD_ID`** (Team 1, Team 2 ou tout autre vocal ; présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Les vocaux des autres serveurs sont ignorés. Le bot doit avoir **View Channel** sur tous les vocaux à observer : un salon invisible pour lui n'est pas compté. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). Lecture (Phase 2) : `GameAttendanceStore(db_path).spectators(game_id)`.
+- **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans **n'importe quel salon vocal du serveur `SHAMELESS_GUILD_ID`** (Team 1, Team 2 ou tout autre vocal ; présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Les vocaux des autres serveurs sont ignorés. Le bot doit avoir **View Channel** sur tous les vocaux à observer : un salon invisible pour lui n'est pas compté. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). À la clôture, cet ensemble est transmis à l'API (section suivante).
+
+## Spectateurs transmis à l'API (`PUT /bot/games/{id}/spectateurs`)
+
+À la clôture d'une Game (`game_completed`), le bot pousse vers l'API l'ensemble observé, avant la fermeture des votes (10 minutes après cette clôture) :
+
+- Route `/bot/...` uniquement, sur `SHAMELESS_API_URL`, avec `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>`. Le `game_id` du snapshot (identifiant numérique de la Game) forme le chemin ; un `game_id` absent ou non numérique est logué et ignoré — l'event reste acquitté, un retry ne réparerait pas le payload.
+- Corps `{"discordIds": ["...", ...]}` : snowflakes en texte, triés. La transmission **remplace** l'ensemble côté API : elle peut être rejouée telle quelle après un échec, sans créer de doublon.
+- Le récap est publié **avant** la transmission. Un échec de transmission (réponse `500` du webhook) ne republie donc pas le récap au retry : seule la transmission est rejouée.
+- Échecs : panne réseau, `5xx`, `401` ou config (`SHAMELESS_API_URL`, `SHAMELESS_BOT_TO_API_KEY`) absente -> l'event n'est pas acquitté (`500`) et Shameless retente. `400`, `404` ou `409` (votes déjà clos) -> logués puis acquittés : retenter n'y changerait rien.
+- La clé ne figure jamais dans un message d'erreur ni dans un log. Lecture côté bot pour les tests : `ShamelessApiClient.put_spectateurs(game_id, discord_ids)` (`services/shameless_client.py`).
 
 ## Docker
 

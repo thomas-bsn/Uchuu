@@ -42,14 +42,27 @@ def players_of(team: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in players if isinstance(p, dict)]
 
 
+def decimal_text(value: Any) -> str | None:
+    """Texte décimal ASCII, ou None.
+
+    `str.isdigit()` est vrai pour des caractères qu'`int()` refuse (« ² », « ½ » non :
+    exposants / chiffres de circulation) : on n'accepte que les chiffres ASCII.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isascii() and text.isdigit():
+            return text
+    return None
+
+
 def parse_discord_id(raw: Any) -> int | None:
     """Snowflake Discord (string, ou int toléré) -> int ; None si absent ou invalide."""
     if isinstance(raw, bool) or raw is None or raw == "":
         return None
     if isinstance(raw, int):
         value = raw
-    elif isinstance(raw, str) and raw.strip().isdigit():
-        value = int(raw.strip())
+    elif (text := decimal_text(raw)) is not None:
+        value = int(text)
     else:
         logger.warning("shameless: discord_id invalide ignoré : %r", raw)
         return None
@@ -60,6 +73,20 @@ def linked_discord_ids(team: dict[str, Any]) -> list[int]:
     """IDs Discord valides des Joueurs liés de la Team, dans l'ordre du snapshot."""
     ids = (parse_discord_id(p.get("discord_id")) for p in players_of(team))
     return [i for i in ids if i is not None]
+
+
+def game_id_of(data: dict[str, Any]) -> int | None:
+    """`game_id` du contrat (identifiant numérique en texte) -> int. None si absent ou
+    invalide : la Game n'est alors pas adressable sur `/bot/games/{id}`, inutile de retenter."""
+    raw = data.get("game_id")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    text = decimal_text(raw)
+    if text is not None:
+        raw = int(text)
+    if isinstance(raw, int) and raw > 0:
+        return raw
+    return None
 
 
 def participant_discord_ids(data: dict[str, Any]) -> set[str]:

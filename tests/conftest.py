@@ -1,5 +1,6 @@
 """Harness partagé : BotSettings de test (dict d'env, jamais os.environ), fake bot,
-SQLite temporaire, client HTTP monté via create_internal_api(bot, settings), webhooks signés."""
+SQLite temporaire, faux serveur vocal (cog Shameless Games), fausse API Shameless,
+client HTTP monté via create_internal_api(bot, settings), webhooks signés."""
 import asyncio
 import threading
 from dataclasses import replace
@@ -9,9 +10,24 @@ import pytest
 
 from bot_settings import BotSettings
 from internal_api import create_internal_api
-from tests.fakes import WEBHOOK_PATH, WEBHOOK_SECRET, FakeBot, encode_event, sign_webhook
+from tests.fakes import (
+    ANNOUNCE,
+    FOREIGN_VOICE,
+    GUILD_ID,
+    OTHER_GUILD_ID,
+    OTHER_VOICE,
+    SHARED,
+    TEAM1,
+    TEAM2,
+    WEBHOOK_PATH,
+    WEBHOOK_SECRET,
+    FakeBot,
+    FakeShamelessApi,
+    encode_event,
+    sign_webhook,
+)
 
-SHAMELESS_GUILD_ID = 1000
+SHAMELESS_GUILD_ID = GUILD_ID  # le serveur des fixtures Shameless Games (fakes.py)
 SHAMELESS_BOT_API_KEY = "test-bot-api-key"
 
 TEST_ENV = {
@@ -21,10 +37,12 @@ TEST_ENV = {
     "SHAMELESS_WEBHOOK_SECRET": WEBHOOK_SECRET,
     "SHAMELESS_GUILD_ID": str(SHAMELESS_GUILD_ID),
     "SHAMELESS_BOT_API_KEY": SHAMELESS_BOT_API_KEY,
-    "SHAMELESS_TEAM1_VOICE_ID": "2001",
-    "SHAMELESS_TEAM2_VOICE_ID": "2002",
-    "SHAMELESS_ANNOUNCE_CHANNEL_ID": "3000",
+    "SHAMELESS_TEAM1_VOICE_ID": str(TEAM1),
+    "SHAMELESS_TEAM2_VOICE_ID": str(TEAM2),
+    "SHAMELESS_ANNOUNCE_CHANNEL_ID": str(ANNOUNCE),
     "SHAMELESS_WEB_URL": "https://shameless.example",
+    "SHAMELESS_API_URL": "https://api.shameless.example",
+    "SHAMELESS_BOT_TO_API_KEY": "test-bot-to-api-key",
 }
 
 
@@ -52,6 +70,30 @@ def shameless_settings(bot_settings):
 def fake_bot():
     """Bot par défaut de make_client() ; runtime_loop = boucle du test si non fournie."""
     return FakeBot()
+
+
+@pytest.fixture
+def fake_api():
+    """Fausse API Shameless (routes /bot) : les handlers y poussent leurs appels."""
+    return FakeShamelessApi()
+
+
+@pytest.fixture
+def guild(fake_bot):
+    """Serveur Shameless avec ses vocaux (dont un non configuré) et son salon d'annonce."""
+    guild = fake_bot.add_guild(GUILD_ID)
+    for channel_id in (SHARED, TEAM1, TEAM2, OTHER_VOICE):
+        guild.add_voice_channel(channel_id)
+    guild.add_text_channel(ANNOUNCE)
+    return guild
+
+
+@pytest.fixture
+def other_guild(fake_bot):
+    """Un autre serveur où le bot est aussi présent : ses vocaux ne comptent pas."""
+    guild = fake_bot.add_guild(OTHER_GUILD_ID)
+    guild.add_voice_channel(FOREIGN_VOICE)
+    return guild
 
 
 @pytest.fixture

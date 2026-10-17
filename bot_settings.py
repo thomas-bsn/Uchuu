@@ -88,6 +88,8 @@ class BotSettings:
                 ),
                 claim_lease_seconds=env.float("SHAMELESS_CLAIM_LEASE_SECONDS", ShamelessSettings.claim_lease_seconds),
                 bot_api_key=env.optional_str("SHAMELESS_BOT_API_KEY"),
+                api_url=env.optional_str("SHAMELESS_API_URL"),
+                bot_to_api_key=env.optional_str("SHAMELESS_BOT_TO_API_KEY"),
                 guild_id=env.optional_int("SHAMELESS_GUILD_ID"),
                 team1_voice_id=env.optional_int("SHAMELESS_TEAM1_VOICE_ID"),
                 team2_voice_id=env.optional_int("SHAMELESS_TEAM2_VOICE_ID"),

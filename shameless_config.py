@@ -25,6 +25,9 @@ class ShamelessSettings:
 
     # Clé des requêtes authentifiées API -> bot (voice candidates)
     bot_api_key: str | None = None
+    # Client HTTP bot -> API (routes /bot) : URL de l'API et clé machine dédiée
+    api_url: str | None = None
+    bot_to_api_key: str | None = None
     guild_id: int | None = None
     team1_voice_id: int | None = None
     team2_voice_id: int | None = None

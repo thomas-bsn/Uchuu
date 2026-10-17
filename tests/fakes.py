@@ -13,6 +13,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+
+from cogs.shameless_games import ShamelessGames
+
 
 # =========================
 # DISCORD FAKES
@@ -148,6 +154,161 @@ class FakeBot:
         if channel is None:
             raise LookupError(f"unknown channel {channel_id}")
         return channel
+
+
+# =========================
+# SHAMELESS GAMES (Annonce de Série / récap de Game) — partagé par #5 et #14
+# =========================
+
+GUILD_ID = 1000
+SHARED, TEAM1, TEAM2, OTHER_VOICE = 2000, 2001, 2002, 2999  # SHARED : vocal quelconque, non configuré
+OTHER_GUILD_ID, FOREIGN_VOICE = 4000, 4001
+ANNOUNCE = 3000
+
+
+def team(name, side, players):
+    return {"name": name, "side": side, "players": players}
+
+
+def player(name, discord_id, **stats):
+    return {"name": name, "discord_id": discord_id, **stats}
+
+
+TEAM_A = team("Les Chauves", "blue", [player(f"A{i}", str(100 + i)) for i in range(1, 6)])
+TEAM_B = team("Les Barbus", "red", [player(f"B{i}", str(200 + i)) for i in range(1, 6)])
+PARTICIPANTS = [p["discord_id"] for p in TEAM_A["players"] + TEAM_B["players"]]
+
+
+def game_started(game_id="g-1", game_number=1, series_id="s-1", **extra):
+    data = {
+        "series_id": series_id,
+        "game_id": game_id,
+        "game_number": game_number,
+        "best_of": 3,
+        # même forme de Teams que teams_formed (#4)
+        "team_a": TEAM_A,
+        "team_b": TEAM_B,
+        "participant_discord_ids": PARTICIPANTS,
+        **extra,
+    }
+    return make_event("game_started", data)
+
+
+def game_completed(game_id="g-1", game_number=1, series_id="s-1", **overrides):
+    data = {
+        "series_id": series_id,
+        "game_id": game_id,
+        "game_number": game_number,
+        "best_of": 3,
+        "winner": "A",
+        "series_score": {"A": 1, "B": 0},
+        "duration_seconds": 1834,
+        "recap_url": f"https://shameless.example/games/{game_id}",
+        "team_a": team("Les Chauves", "blue", [
+            player("Zed Main", "101", champion="Zed", role="MID", kills=12, deaths=3, assists=7,
+                   cs=243, cs_per_min=7.9, kill_participation=0.61, damage=31250, performance_score=88),
+        ]),
+        "team_b": team("Les Barbus", "red", [
+            player("Feeder", "201", champion="Yuumi", role="SUPPORT", kills=0, deaths=11, assists=4,
+                   cs=12, cs_per_min=0.4, kill_participation=0.33, damage=4100, performance_score=12),
+        ]),
+        "participant_discord_ids": PARTICIPANTS,
+    }
+    data.update(overrides)
+    return make_event("game_completed", data)
+
+
+async def load_games(bot, settings, api=None):
+    """Le cog tel que chargé au boot : cog_load enregistre ses handlers sur le dispatcher.
+
+    `api` : client Shameless injecté (tests de transmission #14) ; None -> construit depuis
+    la config à la première transmission.
+    """
+    cog = ShamelessGames(bot, settings, api=api)
+    await cog.cog_load()
+    return cog
+
+
+async def join(cog, member, channel):
+    """Simule l'event gateway on_voice_state_update."""
+    before = FakeVoiceState(member.voice_channel) if member.voice_channel else None
+    if member.voice_channel is not None:
+        member.voice_channel.members.remove(member)
+    member.voice_channel = channel
+    if channel is not None:
+        channel.members.append(member)
+    after = FakeVoiceState(channel) if channel else None
+    await cog.on_voice_state_update(member, before, after)
+
+
+# =========================
+# SHAMELESS API FAKE (bot -> API)
+# =========================
+
+class PutSpectateurs(BaseModel):
+    """`SignalerSpectateursRequest` du contrat OpenAPI (tag Bot)."""
+
+    discordIds: list[str]
+
+
+@dataclass
+class ApiCall:
+    method: str
+    path: str
+    payload: Any
+    authorization: str | None
+
+
+class FakeShamelessApi:
+    """Fausse API Shameless : une vraie app FastAPI servie par un transport httpx.
+
+    Enregistre chaque appel (méthode, chemin, corps, Authorization) et applique la
+    sémantique des routes `/bot` : clé inconnue -> 401, `status` forcé -> ProblemDetails,
+    `PUT .../spectateurs` remplace l'ensemble. `unreachable_transport()` simule une panne
+    réseau, sans serveur.
+    """
+
+    BASE_URL = "https://api.shameless.test"
+    BOT_TO_API_KEY = "test-bot-to-api-key"
+
+    def __init__(self, api_key: str = BOT_TO_API_KEY):
+        self.api_key = api_key
+        self.calls: list[ApiCall] = []
+        self.spectateurs: dict[int, list[str]] = {}
+        self.status: int | None = None  # force la réponse (erreur API) ; None -> 200
+        self.detail = "votes already closed"
+        self.app = self._build_app()
+
+    @property
+    def base_url(self) -> str:
+        return self.BASE_URL
+
+    @property
+    def transport(self) -> httpx.ASGITransport:
+        return httpx.ASGITransport(app=self.app)
+
+    def unreachable_transport(self) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused", request=request)
+
+        return httpx.MockTransport(handler)
+
+    def _build_app(self) -> FastAPI:
+        app = FastAPI()
+        api = self
+
+        @app.put("/bot/games/{game_id}/spectateurs")
+        async def put_spectateurs(game_id: int, request: Request, payload: PutSpectateurs):
+            authorization = request.headers.get("authorization")
+            api.calls.append(ApiCall("PUT", request.url.path, payload.model_dump(), authorization))
+            if authorization != f"Bearer {api.api_key}":
+                raise HTTPException(status_code=401, detail="invalid shameless api key")
+            if api.status is not None and api.status != 200:
+                raise HTTPException(status_code=api.status, detail=api.detail)
+            api.spectateurs[game_id] = list(payload.discordIds)  # remplace l'ensemble
+            return {"gameId": game_id, "discordIds": api.spectateurs[game_id]}
+
+        return app
 
 
 # =========================
