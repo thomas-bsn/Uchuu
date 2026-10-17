@@ -365,22 +365,33 @@ async def test_a_clip_refused_by_the_api_is_reported_to_its_author(clips, clips_
     assert fake_api.clips == {}  # rien de stocké
 
 
-async def test_a_broken_api_is_reported_to_its_author_and_the_clip_can_be_resent_without_duplicate(
+async def test_a_transient_panne_is_replayed_with_the_same_attachment_id_without_duplicate(
     clips, clips_channel, fake_api
 ):
-    fake_api.status = 503
-    message = clip_message(clips_channel, attachments=[clip_attachment(7001)])
+    # premier envoi en panne (503), rejeu du MÊME attachmentId : l'API idempotente n'en
+    # garde qu'un seul (AC #17), le bot n'a rien à signaler à l'auteur
+    fake_api.transient_failures = 1
 
-    await clips.on_message(message)
+    await clips.on_message(clip_message(clips_channel, attachments=[clip_attachment(7001)]))
 
-    fake_api.status = None  # l'API revient ; l'auteur republie le même clip
-    await clips.on_message(message)
-
-    assert "republie-le" in clips_channel.sent[0]["content"]  # la panne est signalée à l'auteur
-    assert len(clips_channel.sent) == 1  # et le dépôt réussi ne dit rien de plus
-    assert len(fake_api.calls) == 2  # deux tentatives, un seul clip (idempotence sur attachmentId)
-    assert list(fake_api.clips) == ["7001"]
+    assert [call.payload["attachmentId"] for call in fake_api.calls] == ["7001", "7001"]
+    assert list(fake_api.clips) == ["7001"]  # un seul clip stocké
     assert fake_api.clip_files["7001"] == CLIP_FILE
+    assert clips_channel.sent == []
+
+
+async def test_an_api_panne_after_the_replays_is_reported_honestly_to_the_author(clips, clips_channel, fake_api):
+    fake_api.status = 503  # la panne persiste : tous les rejeux échouent
+
+    await clips.on_message(clip_message(clips_channel, attachments=[clip_attachment(7001)]))
+
+    assert {call.payload["attachmentId"] for call in fake_api.calls} == {"7001"}  # même pièce jointe rejouée
+    assert len(fake_api.calls) >= 2  # au moins un rejeu du même attachmentId
+    assert fake_api.clips == {}  # rien de stocké
+    content = clips_channel.sent[0]["content"]
+    assert "réessaie" in content
+    # plus de promesse fausse : republier le message créerait un NOUVEAU attachmentId
+    assert "dupliqué" not in content and "republie" not in content
 
 
 async def test_a_missing_api_configuration_is_reported_instead_of_raising(

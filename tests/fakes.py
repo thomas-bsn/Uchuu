@@ -572,6 +572,7 @@ class FakeShamelessApi:
         self.clip_game_id: int | None = None  # Game que l'API rattache (défaut : aucune)
         self.clip_rattachement: str | None = None
         self.status: int | None = None  # force la réponse (erreur API) ; None -> 200/201
+        self.transient_failures = 0  # nb de prochains dépôts de clip en panne réseau (503)
         self.detail = "votes already closed"
         self.app = self._build_app()
 
@@ -770,6 +771,9 @@ class FakeShamelessApi:
             api.calls.append(call)
             if call.authorization != f"Bearer {api.api_key}":
                 raise HTTPException(status_code=401, detail="invalid shameless api key")
+            if api.transient_failures > 0:  # panne passagère : le dépôt peut être rejoué
+                api.transient_failures -= 1
+                raise HTTPException(status_code=503, detail="API Shameless momentanément indisponible.")
             if api.status is not None and api.status != 200:
                 raise HTTPException(status_code=api.status, detail=api.detail)
             if content_type not in api.VIDEO_TYPES:
@@ -829,9 +833,11 @@ def clip_message(
     )
 
 
-async def load_clips(bot, settings, api=None):
-    """Le cog Clips tel que chargé au boot (listener on_message), client API injectable."""
-    cog = ShamelessClips(bot, settings, api=api)
+async def load_clips(bot, settings, api=None, *, replay_delay_seconds=0.0):
+    """Le cog Clips tel que chargé au boot (listener on_message), client API injectable.
+
+    `replay_delay_seconds=0` en test : les rejeux du même `attachmentId` sont immédiats."""
+    cog = ShamelessClips(bot, settings, api=api, replay_delay_seconds=replay_delay_seconds)
     await cog.cog_load()
     return cog
 
