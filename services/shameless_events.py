@@ -43,17 +43,33 @@ Handler = Callable[[ShamelessEvent], Awaitable[None]]
 
 class ShamelessEventDispatcher:
     def __init__(self) -> None:
-        self._handlers: dict[str, Handler] = {}
+        self._handlers: dict[str, list[Handler]] = {}
 
     def register(self, event_type: str, handler: Handler) -> None:
-        # remplace silencieusement : un reload de cog ré-enregistre
-        self._handlers[event_type] = handler
+        # plusieurs cogs peuvent écouter le même type (ex. #15 Votes en plus de #5 Games) ;
+        # un reload de cog ré-enregistre le MÊME handler : pas de doublon.
+        handlers = self._handlers.setdefault(event_type, [])
+        if handler not in handlers:
+            handlers.append(handler)
 
-    def unregister(self, event_type: str) -> None:
-        self._handlers.pop(event_type, None)
+    def unregister(self, event_type: str, handler: Handler | None = None) -> None:
+        """Sans `handler`, retire tous les handlers du type (comportement historique)."""
+        if handler is None:
+            self._handlers.pop(event_type, None)
+            return
+        remaining = [h for h in self._handlers.get(event_type, []) if h != handler]
+        if remaining:
+            self._handlers[event_type] = remaining
+        else:
+            self._handlers.pop(event_type, None)
+
+    def handlers_for(self, event_type: str) -> list[Handler]:
+        """Tous les handlers du type, dans l'ordre d'enregistrement."""
+        return list(self._handlers.get(event_type, ()))
 
     def handler_for(self, event_type: str) -> Handler | None:
-        return self._handlers.get(event_type)
+        handlers = self._handlers.get(event_type)
+        return handlers[0] if handlers else None
 
 
 _dispatcher_lock = threading.Lock()

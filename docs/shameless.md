@@ -17,10 +17,12 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_DB_PATH` | Fichier SQLite local (dédup webhooks, présences). En Docker : `/data/shameless.sqlite3`. |
 | `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux Team 1 / Team 2 (moves d'équipe). Il n'y a pas de vocal commun configuré : l'ancienne `SHAMELESS_SHARED_VOICE_ID` n'est plus lue (ignorée si encore présente). |
 | `SHAMELESS_ANNOUNCE_CHANNEL_ID` | Salon texte des annonces et récaps. |
+| `SHAMELESS_VOTE_CHANNEL_ID` | Salon texte des bulletins de vote MVP/DOFD (#15). |
+| `SHAMELESS_VOTE_DURATION_SECONDS` | Durée du vote après la fin de la Game (défaut 600 = 10 min). |
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
 
-Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), et **le bot appelle aussi l'API** sur les routes `/bot/…` (présences des Spectateurs, puis votes, pronostics et clips en Phase 2) avec `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>` et `SHAMELESS_API_URL`. Le bot n'a pas le credential inverse (`SHAMELESS_BOT_API_KEY`) dans ce sens : les deux clés sont distinctes. `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
+Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), et **le bot appelle aussi l'API** sur les routes `/bot/…` (présences des Spectateurs, votes MVP/DOFD, puis pronostics et clips en Phase 2) avec `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>` et `SHAMELESS_API_URL`. Le bot n'a pas le credential inverse (`SHAMELESS_BOT_API_KEY`) dans ce sens : les deux clés sont distinctes. `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
 
 Credentials : générez des valeurs aléatoires longues (par ex. `openssl rand -hex 32`), stockez-les dans l'env du bot et dans celle de l'API. Rotation = changer les deux env puis redémarrer, aucun changement de code.
 
@@ -148,7 +150,7 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 ```
 
 - **Annonce de Série** : au premier `game_started` reçu pour un `series_id` (normalement la Game n°1, mais aussi une Game suivante si celui de la Game 1 a été raté), une seule fois par `series_id`, même si l'API republie avec un autre `event_id` ou après redémarrage.
-- **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Pas de vote MVP/DOFD (Phase 2).
+- **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Le vote MVP/DOFD (#15) est proposé dans `SHAMELESS_VOTE_CHANNEL_ID` (section suivante).
 - Si l'envoi Discord échoue, le webhook répond 500 et le retry republie.
 - **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans **n'importe quel salon vocal du serveur `SHAMELESS_GUILD_ID`** (Team 1, Team 2 ou tout autre vocal ; présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Les vocaux des autres serveurs sont ignorés. Le bot doit avoir **View Channel** sur tous les vocaux à observer : un salon invisible pour lui n'est pas compté. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). À la clôture, cet ensemble est transmis à l'API (section suivante).
 
@@ -161,6 +163,18 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 - Le récap est publié **avant** la transmission. Un échec de transmission (réponse `500` du webhook) ne republie donc pas le récap au retry : seule la transmission est rejouée.
 - Échecs : panne réseau, `5xx`, `401` ou config (`SHAMELESS_API_URL`, `SHAMELESS_BOT_TO_API_KEY`) absente -> l'event n'est pas acquitté (`500`) et Shameless retente. `400`, `404` ou `409` (votes déjà clos) -> logués puis acquittés : retenter n'y changerait rien.
 - La clé ne figure jamais dans un message d'erreur ni dans un log. Lecture côté bot pour les tests : `ShamelessApiClient.put_spectateurs(game_id, discord_ids)` (`services/shameless_client.py`).
+
+## Vote MVP / DOFD (`PUT` et `GET /bot/games/{id}/votes`)
+
+Cog `cogs.shameless_votes`. À `game_completed`, le bot lit le contexte de la Game (`GET /bot/games/{id}`) — source de vérité des dix Joueurs, du statut et de `completedAt` — puis propose le bulletin MVP/DOFD dans `SHAMELESS_VOTE_CHANNEL_ID` (deux menus + un bouton « Valider mon bulletin »). Si le salon est absent ou introuvable, ou si le contexte est momentanément indisponible, le handler échoue (`500`) et Shameless retente ; une Game inconnue (`404`) est acquittée.
+
+- **Éligibilité** : c'est l'API qui décide. Les dix Joueurs de la Game (via leur compte Discord lié) et les Spectateurs transmis à la clôture par #14 peuvent voter ; les autres reçoivent le refus de l'API (`400`), affiché en éphémère au votant. Aucune liste d'éligibilité n'est recopiée côté bot.
+- **Bulletin** : un seul choix par titre (`MVP`, `DOFD`) ; l'un ou l'autre (ou les deux) peut être omis. Chaque validation envoie `PUT /bot/games/{id}/votes` avec `{"votantDiscordId", "mvpPlayerId", "dofdPlayerId"}` (`null` pour un titre omis ; deux `null` retirent le bulletin). Un même votant remplace donc son bulletin autant de fois qu'il veut.
+- **Auto-vote** : le bot refuse de désigner le Joueur auquel le votant est lié, avant tout appel ; l'API le refuserait de toute façon (`400`).
+- **Erreurs API** : `400`/`409` (non éligible, Joueur hors de la Game, auto-vote, votes clos, fenêtre à venir…) sont affichés au votant avec le message de l'API. Panne réseau / `5xx` : le votant est invité à réessayer. La clé ne fuit jamais.
+- **Clôture** : dix minutes après `completedAt` (`SHAMELESS_VOTE_DURATION_SECONDS`), le bot relit `GET /bot/games/{id}/votes` et annonce les gagnants — **tous** les Joueurs à égalité sont reconnus. Avant la clôture, aucun décompte ni gagnant n'est lu ni affiché (l'API les masque de toute façon).
+- **Redémarrage** : l'échéance et les Joueurs vivent dans SQLite (`shameless_vote_windows`). Au boot et à chaque `on_ready`, les fenêtres non annoncées sont relues : celles dont l'échéance est passée sont closes immédiatement, les autres reçoivent un nouveau rappel, et la vue persistante est réenregistrée. Le bulletin n'est jamais republié (publication gardée en SQLite). Le bot ne conserve **aucun** résultat : l'API reste la seule source ; le store ne porte qu'un drapeau « annonce faite ».
+- Lecture côté bot pour les tests : `ShamelessApiClient.get_game`, `put_votes`, `get_votes` (`services/shameless_client.py`).
 
 ## Docker
 
@@ -185,6 +199,7 @@ docker compose up -d --build
   L'intent `voice_states` (non privilégié) est indispensable.
 - Permissions serveur : **View Channel** sur **tous** les salons vocaux du serveur à observer (Picker et présences Spectateurs) ; **View Channel**, **Connect** et **Move Members** sur les salons Team 1 / Team 2.
 - Salon d'annonce (`SHAMELESS_ANNOUNCE_CHANNEL_ID`) : **Send Messages** et **Embed Links**.
+- Salon des votes (`SHAMELESS_VOTE_CHANNEL_ID`) : **Send Messages** et **Embed Links** (bulletin, puis annonce des résultats).
 
 ## Tests
 

@@ -32,4 +32,8 @@ class ShamelessSettings:
     team1_voice_id: int | None = None
     team2_voice_id: int | None = None
     announce_channel_id: int | None = None
+    # Salon des bulletins MVP/DOFD (#15)
+    vote_channel_id: int | None = None
+    # Durée du vote : la clôture est annoncée `CompletedAt` + cette durée (10 min)
+    vote_duration_seconds: float = 600.0
     web_url: str | None = None

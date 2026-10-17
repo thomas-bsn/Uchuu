@@ -23,9 +23,11 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 class ShamelessApiError(RuntimeError):
     """Appel à l'API Shameless impossible ou refusé. Ne contient jamais la clé."""
 
-    def __init__(self, message: str, *, status: int | None = None):
+    def __init__(self, message: str, *, status: int | None = None, detail: str | None = None):
         super().__init__(message)
         self.status = status
+        # `detail` du ProblemDetails : affichable tel quel (message français du refus)
+        self.detail = detail
 
     @property
     def is_permanent(self) -> bool:
@@ -59,6 +61,11 @@ class ShamelessApiClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
+    async def get_game(self, game_id: int) -> dict[str, Any]:
+        """`GET /bot/games/{id}` : contexte de la Game (Joueurs, statut, `completedAt`)."""
+        response = await self._request("GET", f"/bot/games/{game_id}")
+        return response.json()
+
     async def put_spectateurs(self, game_id: int, discord_ids: Iterable[str]) -> None:
         """`PUT /bot/games/{id}/spectateurs` : remplace l'ensemble des Spectateurs côté API
         (rejouable sans doublon)."""
@@ -67,6 +74,34 @@ class ShamelessApiClient:
             f"/bot/games/{game_id}/spectateurs",
             json={"discordIds": sorted(set(discord_ids))},
         )
+
+    async def put_votes(
+        self,
+        game_id: int,
+        votant_discord_id: str,
+        *,
+        mvp_player_id: int | None,
+        dofd_player_id: int | None,
+    ) -> dict[str, Any]:
+        """`PUT /bot/games/{id}/votes` : dépose (ou remplace) le bulletin d'un votant.
+
+        Aller-retour tels quels : une omission part en `null`, deux `null` retirent le bulletin.
+        """
+        response = await self._request(
+            "PUT",
+            f"/bot/games/{game_id}/votes",
+            json={
+                "votantDiscordId": votant_discord_id,
+                "mvpPlayerId": mvp_player_id,
+                "dofdPlayerId": dofd_player_id,
+            },
+        )
+        return response.json()
+
+    async def get_votes(self, game_id: int) -> dict[str, Any]:
+        """`GET /bot/games/{id}/votes` : résultats (décompte et gagnants vides avant clôture)."""
+        response = await self._request("GET", f"/bot/games/{game_id}/votes")
+        return response.json()
 
     async def _request(self, method: str, path: str, *, json: Any = None) -> httpx.Response:
         if not path.startswith("/bot/"):
@@ -77,9 +112,11 @@ class ShamelessApiClient:
         except httpx.HTTPError as error:
             raise ShamelessApiError(f"API Shameless injoignable ({method} {path}) : {error}") from error
         if not response.is_success:
+            detail = _error_detail(response)
             raise ShamelessApiError(
-                f"API Shameless a refusé {method} {path} ({response.status_code}) : {_error_detail(response)}",
+                f"API Shameless a refusé {method} {path} ({response.status_code}) : {detail}",
                 status=response.status_code,
+                detail=detail,
             )
         return response
 
