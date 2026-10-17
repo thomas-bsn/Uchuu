@@ -13,7 +13,7 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_HANDLER_TIMEOUT_SECONDS` | Délai max d'un handler Discord avant réponse 504 (défaut 30). |
 | `SHAMELESS_CLAIM_LEASE_SECONDS` | Durée de réservation d'un event en cours de traitement (défaut 120). Passé ce délai (crash, timeout), un retry le reprend. Doit rester supérieur au timeout handler. |
 | `SHAMELESS_DB_PATH` | Fichier SQLite local (dédup webhooks, présences). En Docker : `/data/shameless.sqlite3`. |
-| `SHAMELESS_SHARED_VOICE_ID`, `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux commun / Team 1 / Team 2. |
+| `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux Team 1 / Team 2 (moves d'équipe). Il n'y a pas de vocal commun configuré : l'ancienne `SHAMELESS_SHARED_VOICE_ID` n'est plus lue (ignorée si encore présente). |
 | `SHAMELESS_ANNOUNCE_CHANNEL_ID` | Salon texte des annonces et récaps. |
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
@@ -108,8 +108,8 @@ Shameless envoie `teams_formed` quand le Picker valide les Teams et la Série, a
 - Un membre déjà dans son vocal d'équipe n'est pas redéplacé. Si un move échoue (permissions, membre parti), l'erreur est loguée et les autres moves continuent.
 - Si le serveur ou un vocal d'équipe est introuvable, le bot ne déplace personne et répond `500` : Shameless retente avec le même `event_id`.
 - Payload mal formé (Team absente, `players` null ou pas une liste, `discord_id` invalide) : la partie invalide est ignorée et loguée, le reste est traité et l'event est acquitté `processed`. Un retry ne réparerait jamais le payload, donc pas de boucle de `500`.
-- Un seul move par Série : `game_started` / `game_completed` ne déplacent personne. Les joueurs reviennent au vocal commun entre les Games et rejoignent leur vocal d'équipe quand ils veulent.
-- Permissions Discord requises sur les salons commun, Team 1 et Team 2 : **View Channel**, **Connect** et **Move Members** (Discord exige que le bot puisse voir et rejoindre le salon cible pour y déplacer quelqu'un).
+- Un seul move par Série : `game_started` / `game_completed` ne déplacent personne. Les joueurs vont où ils veulent entre les Games et rejoignent leur vocal d'équipe quand ils veulent.
+- Permissions Discord requises sur les salons Team 1 et Team 2 : **View Channel**, **Connect** et **Move Members** (Discord exige que le bot puisse voir et rejoindre le salon cible pour y déplacer quelqu'un).
 
 ## Annonces, récaps et présences par Game (`game_started` / `game_completed`)
 
@@ -148,7 +148,7 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 - **Annonce de Série** : au premier `game_started` reçu pour un `series_id` (normalement la Game n°1, mais aussi une Game suivante si celui de la Game 1 a été raté), une seule fois par `series_id`, même si l'API republie avec un autre `event_id` ou après redémarrage.
 - **Récap** : un embed par `game_id` (vainqueur, deux Teams, score de Série, stats fournies, lien web). Lien = `recap_url`, sinon `SHAMELESS_WEB_URL/games/{game_id}`. Tous les champs sont optionnels : ce qui manque n'est pas affiché. Pas de vote MVP/DOFD (Phase 2).
 - Si l'envoi Discord échoue, le webhook répond 500 et le retry republie.
-- **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans les salons commun / Team 1 / Team 2 (présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). Lecture (Phase 2) : `GameAttendanceStore(db_path).spectators(game_id)`.
+- **Présences (Spectateurs)** : `game_started` ouvre une fenêtre pour `game_id`, `game_completed` la ferme. Pendant la fenêtre, les comptes humains vus dans **n'importe quel salon vocal du serveur `SHAMELESS_GUILD_ID`** (Team 1, Team 2 ou tout autre vocal ; présents au départ, arrivés ensuite, présents à la fin) sont enregistrés dans SQLite, hors `participant_discord_ids` (à défaut, les `discord_id` des Teams) et hors bots. Les vocaux des autres serveurs sont ignorés. Le bot doit avoir **View Channel** sur tous les vocaux à observer : un salon invisible pour lui n'est pas compté. Un ensemble par Game ; la fenêtre ouverte survit à un redémarrage (et au `on_ready`, les présents sont rattrapés). Lecture (Phase 2) : `GameAttendanceStore(db_path).spectators(game_id)`.
 
 ## Docker
 
@@ -171,7 +171,7 @@ docker compose up -d --build
   - **Server Members Intent** (membres présents en vocal, Joueurs à déplacer) ;
   - **Message Content Intent** (commandes préfixées des autres cogs).
   L'intent `voice_states` (non privilégié) est indispensable.
-- Permissions serveur : **View Channels** sur les salons vocaux à inspecter ; **View Channel**, **Connect** et **Move Members** sur les salons commun / Team 1 / Team 2.
+- Permissions serveur : **View Channel** sur **tous** les salons vocaux du serveur à observer (Picker et présences Spectateurs) ; **View Channel**, **Connect** et **Move Members** sur les salons Team 1 / Team 2.
 - Salon d'annonce (`SHAMELESS_ANNOUNCE_CHANNEL_ID`) : **Send Messages** et **Embed Links**.
 
 ## Tests

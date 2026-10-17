@@ -97,3 +97,10 @@ def test_settings_are_immutable():
 
     with pytest.raises(AttributeError):
         settings.internal_api.port = 1
+
+
+def test_retired_shared_voice_setting_left_in_the_environment_is_ignored():
+    # #18 : les présences couvrent tous les vocaux du serveur, il n'y a plus de vocal commun
+    settings = BotSettings.from_env({**REQUIRED, "SHAMELESS_SHARED_VOICE_ID": "not-a-number"})
+
+    assert not hasattr(settings.shameless, "shared_voice_id")
