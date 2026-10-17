@@ -52,6 +52,7 @@ class FakeVoiceChannel:
     members: list[FakeMember] = field(default_factory=list)
     position: int = 0
     name: str = "voice"
+    guild: "FakeGuild | None" = None  # comme discord.VoiceChannel.guild
 
     def __post_init__(self):
         self.members = list(self.members)
@@ -94,7 +95,7 @@ class FakeGuild:
         return in_voice + [m for m in self.extra_members if m not in in_voice]
 
     def add_voice_channel(self, channel_id: int, members=(), name: str = "voice") -> FakeVoiceChannel:
-        channel = FakeVoiceChannel(channel_id, list(members), position=len(self.voice_channels), name=name)
+        channel = FakeVoiceChannel(channel_id, list(members), position=len(self.voice_channels), name=name, guild=self)
         self.voice_channels.append(channel)
         return channel
 
