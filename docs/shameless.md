@@ -157,7 +157,7 @@ cp .env.example .env   # puis remplir, ne jamais commiter
 docker compose up -d --build
 ```
 
-- Le volume nommé `shameless-data` est monté sur `/data` et contient `shameless.sqlite3` (et `votes.sqlite3`, voir `docs/configuration.md`).
+- Le volume nommé `shameless-data` est monté sur `/data` et contient `shameless.sqlite3`.
   **Il doit persister entre redéploiements** : le perdre fait rejouer des événements déjà traités.
   Sauvegarde : `docker compose cp bot:/data/shameless.sqlite3 ./backup.sqlite3`.
 - Le port 9000 n'est publié que sur `127.0.0.1` de l'hôte ; seul le reverse proxy HTTPS l'expose.
