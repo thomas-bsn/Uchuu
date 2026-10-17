@@ -103,12 +103,57 @@ class ShamelessApiClient:
         response = await self._request("GET", f"/bot/games/{game_id}/votes")
         return response.json()
 
-    async def _request(self, method: str, path: str, *, json: Any = None) -> httpx.Response:
+    async def post_clip(
+        self,
+        *,
+        message_id: str,
+        attachment_id: str,
+        auteur_id: str,
+        auteur_nom: str,
+        publie_le: str,
+        fichier: bytes,
+        filename: str,
+        content_type: str,
+    ) -> dict[str, Any]:
+        """`POST /bot/clips` en multipart/form-data (ADR 0014) : la vidéo et les métadonnées
+        Discord du message. Idempotent côté API sur `attachmentId` (201 au premier dépôt,
+        200 au rejeu, vidéo non réécrite) : un clip peut donc être retransmis sans doublon.
+
+        Renvoie le `ClipDuBot` (`clipId`, `gameId`, `rattachement`) : c'est la confirmation du
+        dépôt. Le stockage et le rattachement à une Game restent à l'API (Game unique plausible).
+        """
+        response = await self._request(
+            "POST",
+            "/bot/clips",
+            data={
+                "messageId": message_id,
+                "attachmentId": attachment_id,
+                "auteurDiscordId": auteur_id,
+                "auteurNom": auteur_nom,
+                "publieLe": publie_le,
+            },
+            files={"fichier": (filename, fichier, content_type)},
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any = None,
+        data: Any = None,
+        files: Any = None,
+    ) -> httpx.Response:
         if not path.startswith("/bot/"):
             # ADR 0013 : la clé machine n'ouvre QUE les routes du bot — jamais ailleurs
             raise ValueError(f"ce client ne parle qu'aux routes /bot : {method} {path}")
         try:
-            response = await self._http.request(method, path, json=json)
+            response = await self._http.request(method, path, json=json, data=data, files=files)
         except httpx.HTTPError as error:
             raise ShamelessApiError(f"API Shameless injoignable ({method} {path}) : {error}") from error
         if not response.is_success:

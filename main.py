@@ -20,6 +20,7 @@ EXTENSIONS = [
     "cogs.shameless_team_moves",
     "cogs.shameless_games",
     "cogs.shameless_votes",
+    "cogs.shameless_clips",
 ]
 
 

@@ -99,6 +99,8 @@ class BotSettings:
                     "SHAMELESS_VOTE_DURATION_SECONDS", ShamelessSettings.vote_duration_seconds
                 ),
                 web_url=env.optional_str("SHAMELESS_WEB_URL"),
+                clips_channel_id=env.optional_int("SHAMELESS_CLIPS_CHANNEL_ID"),
+                clips_max_bytes=env.int("SHAMELESS_CLIPS_MAX_BYTES", ShamelessSettings.clips_max_bytes),
             ),
         )
         env.raise_if_errors()
