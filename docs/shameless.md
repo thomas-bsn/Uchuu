@@ -18,6 +18,8 @@ Une Instance Shameless par déploiement du bot. Toute la config passe par l'env 
 | `SHAMELESS_TEAM1_VOICE_ID`, `SHAMELESS_TEAM2_VOICE_ID` | Salons vocaux Team 1 / Team 2 (moves d'équipe). Il n'y a pas de vocal commun configuré : l'ancienne `SHAMELESS_SHARED_VOICE_ID` n'est plus lue (ignorée si encore présente). |
 | `SHAMELESS_ANNOUNCE_CHANNEL_ID` | Salon texte des annonces et récaps. |
 | `SHAMELESS_WEB_URL` | URL publique du site (liens de récap). |
+| `SHAMELESS_CLIPS_CHANNEL_ID` | Salon texte des clips (#17). Chaque vidéo qui y est publiée est déposée sur l'API. Vide = dépôt des clips désactivé. |
+| `SHAMELESS_CLIPS_MAX_BYTES` | Taille max d'une vidéo déposée (défaut 500 Mo). À aligner sur `SHAMELESS_CLIPS_MAX_BYTES` de l'API (`Clips:MaxFileSizeBytes`). |
 | `FORWARDED_ALLOW_IPS` | IPs du reverse proxy autorisées à poser `X-Forwarded-*` (lu directement par uvicorn). |
 
 Sens des appels : l'API Shameless appelle le bot (candidats vocaux, webhooks), et **le bot appelle aussi l'API** sur les routes `/bot/…` (présences des Spectateurs, puis votes, pronostics et clips en Phase 2) avec `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>` et `SHAMELESS_API_URL`. Le bot n'a pas le credential inverse (`SHAMELESS_BOT_API_KEY`) dans ce sens : les deux clés sont distinctes. `SHAMELESS_WEB_URL` ne sert qu'à construire des liens affichés dans Discord.
@@ -162,6 +164,25 @@ Snapshot `game_completed` attendu (stats joueur = contrat Shameless #52) :
 - Échecs : panne réseau, `5xx`, `401` ou config (`SHAMELESS_API_URL`, `SHAMELESS_BOT_TO_API_KEY`) absente -> l'event n'est pas acquitté (`500`) et Shameless retente. `400`, `404` ou `409` (votes déjà clos) -> logués puis acquittés : retenter n'y changerait rien.
 - La clé ne figure jamais dans un message d'erreur ni dans un log. Lecture côté bot pour les tests : `ShamelessApiClient.put_spectateurs(game_id, discord_ids)` (`services/shameless_client.py`).
 
+## Clips déposés sur l'API (`POST /bot/clips`)
+
+Cog `cogs.shameless_clips`. Chaque vidéo publiée dans `SHAMELESS_CLIPS_CHANNEL_ID` est téléchargée puis transmise à l'API, qui la garde en stockage durable (ADR 0014) : les liens Discord finissent par expirer, le clip reste consultable sur le site.
+
+- **Types acceptés** : `video/mp4`, `video/webm` et `video/quicktime` (`.mp4`, `.webm`, `.mov`) — les mêmes que l'API. Le `Content-Type` vu par Discord fait foi ; s'il est absent ou générique (`application/octet-stream`), l'extension du fichier tranche. Tout autre fichier est refusé et signalé à l'auteur.
+- **Taille** : au-delà de `SHAMELESS_CLIPS_MAX_BYTES` (défaut 500 Mo, à aligner sur l'API), la vidéo est refusée **sans être téléchargée**. Une vidéo vide est refusée de la même façon.
+- **Transfert** : `multipart/form-data` sur `POST /bot/clips` (routes `/bot` uniquement, `Authorization: Bearer <SHAMELESS_BOT_TO_API_KEY>`), avec `fichier`, `messageId`, `attachmentId`, `auteurDiscordId`, `auteurNom` et `publieLe` (heure de publication du message, ISO 8601 UTC). Chaque pièce jointe d'un message part dès sa réception ; le bot ne stocke rien localement.
+- **Idempotence** : l'API est idempotente sur `attachmentId` (201 au premier dépôt, 200 au rejeu, vidéo non réécrite). Un même clip peut donc être republié après un échec **sans créer de doublon**.
+- **Erreurs**, toujours affichées à l'auteur du clip dans le salon :
+  - type, taille ou vidéo vide : message local, sans appel à l'API ;
+  - refus définitif de l'API (`400`, `413`, `409`…) : le détail de l'API est affiché tel quel ;
+  - panne (réseau, `5xx`, `401`, `429`) ou config (`SHAMELESS_API_URL`, `SHAMELESS_BOT_TO_API_KEY`) absente : l'auteur est invité à republier son clip. Il n'y a **pas** de retry automatique — rien ne rejouerait le message Discord d'origine — et republier ne duplique rien.
+- **Rattachement** : le bot n'attache jamais un clip à une Game lui-même. Il lit la réponse de l'API (`clipId`, `gameId`, `rattachement`) : l'API n'attache automatiquement que si une **Game unique est plausible** (jour de publication, heure de la Game, ADR 0014) ; sinon le clip reste à rattacher à la main depuis le site.
+- **Dépôt confirmé** : une réponse `2xx` (201, ou 200 au rejeu) vaut confirmation. Le succès est tracé dans les logs (`clipId`, `gameId`, `rattachement`) et le bot n'écrit rien dans Discord. La clé `SHAMELESS_BOT_TO_API_KEY` n'apparaît jamais dans Discord ni dans un log.
+- Salon non configuré (`SHAMELESS_CLIPS_CHANNEL_ID` vide) : le dépôt des clips est simplement désactivé, le bot démarre normalement.
+- Les messages du bot lui-même et ceux publiés hors du salon configuré sont ignorés.
+
+Lecture côté bot pour les tests : `ShamelessApiClient.post_clip(...)` (`services/shameless_client.py`) et `services.shameless_clips.video_of` (types et taille).
+
 ## Docker
 
 ```sh
@@ -181,10 +202,11 @@ docker compose up -d --build
 - Gateway intents privilégiés : `main.py` démarre avec `discord.Intents.all()`, qui demande **les trois** intents privilégiés. Activez-les tous dans *Bot > Privileged Gateway Intents*, sinon la connexion est refusée :
   - **Presence Intent** ;
   - **Server Members Intent** (membres présents en vocal, Joueurs à déplacer) ;
-  - **Message Content Intent** (commandes préfixées des autres cogs).
+  - **Message Content Intent** (commandes préfixées des autres cogs, messages du salon des clips).
   L'intent `voice_states` (non privilégié) est indispensable.
 - Permissions serveur : **View Channel** sur **tous** les salons vocaux du serveur à observer (Picker et présences Spectateurs) ; **View Channel**, **Connect** et **Move Members** sur les salons Team 1 / Team 2.
 - Salon d'annonce (`SHAMELESS_ANNOUNCE_CHANNEL_ID`) : **Send Messages** et **Embed Links**.
+- Salon des clips (`SHAMELESS_CLIPS_CHANNEL_ID`) : **View Channel**, **Read Message History** et **Send Messages** (la réponse d'erreur à l'auteur) ; le bot doit aussi pouvoir **joindre des fichiers** (Attach Files) s'il doit répondre avec un fichier — ce n'est pas le cas ici.
 
 ## Tests
 

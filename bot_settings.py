@@ -95,6 +95,8 @@ class BotSettings:
                 team2_voice_id=env.optional_int("SHAMELESS_TEAM2_VOICE_ID"),
                 announce_channel_id=env.optional_int("SHAMELESS_ANNOUNCE_CHANNEL_ID"),
                 web_url=env.optional_str("SHAMELESS_WEB_URL"),
+                clips_channel_id=env.optional_int("SHAMELESS_CLIPS_CHANNEL_ID"),
+                clips_max_bytes=env.int("SHAMELESS_CLIPS_MAX_BYTES", ShamelessSettings.clips_max_bytes),
             ),
         )
         env.raise_if_errors()

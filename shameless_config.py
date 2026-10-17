@@ -33,3 +33,7 @@ class ShamelessSettings:
     team2_voice_id: int | None = None
     announce_channel_id: int | None = None
     web_url: str | None = None
+    # Salon des clips : absent = dépôt des vidéos désactivé
+    clips_channel_id: int | None = None
+    # Taille max d'une vidéo déposée : `Clips:MaxFileSizeBytes` côté API (500 Mo par défaut)
+    clips_max_bytes: int = 500 * 1024 * 1024
