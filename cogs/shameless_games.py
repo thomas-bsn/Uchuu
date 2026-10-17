@@ -142,4 +142,4 @@ class ShamelessGames(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(ShamelessGames(bot, ShamelessSettings.from_env()))
+    await bot.add_cog(ShamelessGames(bot, bot.settings.shameless))
