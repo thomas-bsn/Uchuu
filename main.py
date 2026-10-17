@@ -17,7 +17,6 @@ EXTENSIONS = [
     "commands.helps",
     "commands.clean",
     "commands.profile_pictures",
-    "cogs.votes",
     "cogs.shameless_team_moves",
     "cogs.shameless_games",
 ]
