@@ -79,10 +79,11 @@ def main():
     # INFO de tous les modules, pas que de discord ; stdout et sans codes couleur : les logs
     # de conteneur ne sont pas un terminal (stderr s'afficherait en rouge)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    # via log_formatter : discord.py réapplique sinon son format coloré sur le handler
+    formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s %(message)s", "%Y-%m-%d %H:%M:%S")
     # httpx logge chaque URL, dont les liens signés du CDN Discord
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    bot.run(settings.discord.token, log_handler=handler, root_logger=True)
+    bot.run(settings.discord.token, log_handler=handler, log_formatter=formatter, root_logger=True)
 
 
 if __name__ == "__main__":
