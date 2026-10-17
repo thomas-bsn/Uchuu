@@ -13,7 +13,8 @@ from services.shameless_games_store import GameAttendanceStore
 from tests.fakes import FakeBot, FakeVoiceState, make_event
 
 GUILD_ID = 1000
-SHARED, TEAM1, TEAM2, OTHER_VOICE = 2000, 2001, 2002, 2999
+SHARED, TEAM1, TEAM2, OTHER_VOICE = 2000, 2001, 2002, 2999  # SHARED : vocal quelconque, non configuré
+OTHER_GUILD_ID, FOREIGN_VOICE = 4000, 4001
 ANNOUNCE = 3000
 
 
@@ -83,6 +84,14 @@ async def load_games(bot, settings):
     cog = ShamelessGames(bot, settings)
     await cog.cog_load()
     return cog
+
+
+@pytest.fixture
+def other_guild(fake_bot):
+    """Un autre serveur où le bot est aussi présent : ses vocaux ne comptent pas."""
+    guild = fake_bot.add_guild(OTHER_GUILD_ID)
+    guild.add_voice_channel(FOREIGN_VOICE)
+    return guild
 
 
 @pytest.fixture
@@ -311,18 +320,19 @@ async def join(cog, member, channel):
     await cog.on_voice_state_update(member, before, after)
 
 
-async def test_spectators_already_in_configured_voice_at_game_start_are_recorded(
-    guild, games, client, post_event, shameless_settings
+async def test_spectators_in_any_voice_of_the_server_at_game_start_are_recorded(
+    guild, other_guild, games, client, post_event, shameless_settings
 ):
     guild.add_member(101, voice=guild.get_channel(TEAM1))  # Joueur
     guild.add_member(500, voice=guild.get_channel(SHARED))  # Spectateur
     guild.add_member(501, voice=guild.get_channel(TEAM2))  # Spectateur dans un salon Team
-    guild.add_member(502, voice=guild.get_channel(OTHER_VOICE))  # hors salons configurés
+    guild.add_member(502, voice=guild.get_channel(OTHER_VOICE))  # vocal quelconque du serveur
     guild.add_member(900, bot=True, voice=guild.get_channel(SHARED))  # bot
+    other_guild.add_member(503, voice=other_guild.get_channel(FOREIGN_VOICE))  # autre serveur
 
     await post_event(client, game_started("g-1"))
 
-    assert spectators(shameless_settings, "g-1") == ["500", "501"]
+    assert spectators(shameless_settings, "g-1") == ["500", "501", "502"]
 
 
 async def test_voice_joins_are_recorded_only_between_start_and_completion(
@@ -345,6 +355,19 @@ async def test_voice_joins_are_recorded_only_between_start_and_completion(
     await join(games, late, guild.get_channel(SHARED))
 
     assert spectators(shameless_settings, "g-1") == ["601"]
+
+
+async def test_joining_any_voice_of_the_server_counts_but_other_servers_do_not(
+    guild, other_guild, games, client, post_event, shameless_settings
+):
+    anywhere = guild.add_member(610)
+    elsewhere = other_guild.add_member(611)
+
+    await post_event(client, game_started("g-1"))
+    await join(games, anywhere, guild.get_channel(OTHER_VOICE))
+    await join(games, elsewhere, other_guild.get_channel(FOREIGN_VOICE))
+
+    assert spectators(shameless_settings, "g-1") == ["610"]
 
 
 async def test_each_game_of_a_series_has_its_own_attendance(guild, games, client, post_event, shameless_settings):
@@ -387,7 +410,7 @@ async def test_people_in_voice_when_bot_comes_back_are_recorded_for_the_open_gam
 ):
     await post_event(client, game_started("g-1"))
     # arrivé pendant que le bot était déconnecté
-    guild.add_member(810, voice=guild.get_channel(SHARED))
+    guild.add_member(810, voice=guild.get_channel(OTHER_VOICE))
 
     rebooted_games = await load_games(FakeBot(guilds=[guild]), shameless_settings)
     await rebooted_games.on_ready()
