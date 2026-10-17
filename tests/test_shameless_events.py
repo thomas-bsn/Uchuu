@@ -1,14 +1,19 @@
 """Dispatcher webhook : plusieurs handlers par type d'event (chaînage des cogs).
 
-#5 possède `game_started` / `game_completed`, #4 `teams_formed` ; #16 (pronostics) doit
-observer les mêmes events sans remplacer leurs handlers. Le dispatcher les chaîne donc,
-dans l'ordre d'enregistrement, et `handler_for` reste l'interface du contrôleur.
+#5 possède `game_started` / `game_completed`, #4 `teams_formed`, #15 les votes MVP/DOFD et
+#16 (pronostics) doit observer les mêmes events sans remplacer leurs handlers. Le
+contrôleur webhook parcourt donc `handlers_for`, dans l'ordre d'enregistrement.
 """
 from services.shameless_events import ShamelessEvent, ShamelessEventDispatcher
 
 
 def event(event_type="game_completed"):
     return ShamelessEvent(version=1, event_id="e-1", type=event_type)
+
+
+async def run(dispatcher, event_type):
+    for handler in dispatcher.handlers_for(event_type):
+        await handler(event(event_type))
 
 
 async def test_handlers_registered_for_the_same_type_all_run_in_order():
@@ -24,7 +29,7 @@ async def test_handlers_registered_for_the_same_type_all_run_in_order():
     dispatcher.register("game_completed", first)
     dispatcher.register("game_completed", second)
 
-    await dispatcher.handler_for("game_completed")(event())
+    await run(dispatcher, "game_completed")
 
     assert seen == ["first", "second"]
 
@@ -39,7 +44,7 @@ async def test_registering_the_same_handler_twice_does_not_run_it_twice():
     dispatcher.register("game_started", handler)
     dispatcher.register("game_started", handler)
 
-    await dispatcher.handler_for("game_started")(event("game_started"))
+    await run(dispatcher, "game_started")
 
     assert seen == ["x"]
 
@@ -58,7 +63,7 @@ async def test_unregistering_one_handler_keeps_the_others():
     dispatcher.register("teams_formed", second)
 
     dispatcher.unregister("teams_formed", first)
-    await dispatcher.handler_for("teams_formed")(event("teams_formed"))
+    await run(dispatcher, "teams_formed")
 
     assert seen == ["second"]
 

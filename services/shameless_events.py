@@ -43,44 +43,38 @@ Handler = Callable[[ShamelessEvent], Awaitable[None]]
 
 class ShamelessEventDispatcher:
     """Plusieurs handlers par type d'event : chaque cog observe les events dont il a besoin
-    sans remplacer ceux des autres. `handler_for` renvoie un handler composite (l'interface
-    du contrôleur webhook) ; `handlers_for` expose la liste."""
+    sans remplacer ceux des autres (#15 Votes en plus de #5 Games, #16 Pronostics en plus
+    des deux). `handlers_for` expose la liste, dans l'ordre d'enregistrement, et c'est elle
+    que le contrôleur webhook parcourt ; `handler_for` renvoie le premier (usage direct)."""
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[Handler]] = {}
 
     def register(self, event_type: str, handler: Handler) -> None:
-        # un reload de cog ré-enregistre le même handler : ne pas l'exécuter deux fois
+        # plusieurs cogs peuvent écouter le même type (ex. #15 Votes en plus de #5 Games) ;
+        # un reload de cog ré-enregistre le MÊME handler : pas de doublon.
         handlers = self._handlers.setdefault(event_type, [])
         if handler not in handlers:
             handlers.append(handler)
 
     def unregister(self, event_type: str, handler: Handler | None = None) -> None:
-        """Retire `handler` s'il est fourni, sinon tous les handlers du type."""
+        """Sans `handler`, retire tous les handlers du type (comportement historique)."""
         if handler is None:
             self._handlers.pop(event_type, None)
             return
-        handlers = self._handlers.get(event_type)
-        if handlers and handler in handlers:
-            handlers.remove(handler)
-            if not handlers:
-                self._handlers.pop(event_type, None)
+        remaining = [h for h in self._handlers.get(event_type, []) if h != handler]
+        if remaining:
+            self._handlers[event_type] = remaining
+        else:
+            self._handlers.pop(event_type, None)
 
     def handlers_for(self, event_type: str) -> list[Handler]:
+        """Tous les handlers du type, dans l'ordre d'enregistrement."""
         return list(self._handlers.get(event_type, ()))
 
     def handler_for(self, event_type: str) -> Handler | None:
-        handlers = self.handlers_for(event_type)
-        if not handlers:
-            return None
-        if len(handlers) == 1:
-            return handlers[0]
-
-        async def chained(event: ShamelessEvent) -> None:
-            for handler in handlers:
-                await handler(event)
-
-        return chained
+        handlers = self._handlers.get(event_type)
+        return handlers[0] if handlers else None
 
 
 _dispatcher_lock = threading.Lock()

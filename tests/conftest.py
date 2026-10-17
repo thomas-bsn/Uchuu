@@ -19,6 +19,7 @@ from tests.fakes import (
     SHARED,
     TEAM1,
     TEAM2,
+    VOTE,
     WEBHOOK_PATH,
     WEBHOOK_SECRET,
     FakeBot,
@@ -40,6 +41,7 @@ TEST_ENV = {
     "SHAMELESS_TEAM1_VOICE_ID": str(TEAM1),
     "SHAMELESS_TEAM2_VOICE_ID": str(TEAM2),
     "SHAMELESS_ANNOUNCE_CHANNEL_ID": str(ANNOUNCE),
+    "SHAMELESS_VOTE_CHANNEL_ID": str(VOTE),
     "SHAMELESS_WEB_URL": "https://shameless.example",
     "SHAMELESS_API_URL": "https://api.shameless.example",
     "SHAMELESS_BOT_TO_API_KEY": "test-bot-to-api-key",
@@ -80,11 +82,13 @@ def fake_api():
 
 @pytest.fixture
 def guild(fake_bot):
-    """Serveur Shameless avec ses vocaux (dont un non configuré) et son salon d'annonce."""
+    """Serveur Shameless avec ses vocaux (dont un non configuré), son salon d'annonce
+    et son salon de bulletins de vote."""
     guild = fake_bot.add_guild(GUILD_ID)
     for channel_id in (SHARED, TEAM1, TEAM2, OTHER_VOICE):
         guild.add_voice_channel(channel_id)
     guild.add_text_channel(ANNOUNCE)
+    guild.add_text_channel(VOTE)
     return guild
 
 
