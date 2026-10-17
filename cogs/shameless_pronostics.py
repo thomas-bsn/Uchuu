@@ -71,8 +71,15 @@ class ShamelessPronostics(commands.Cog):
         dispatcher.register(EVENT_TEAMS_FORMED, self.on_teams_formed)
         dispatcher.register(EVENT_GAME_COMPLETED, self.on_game_completed)
         dispatcher.register(EVENT_GAME_STARTED, self.on_game_started)
+        await self._reconcile()  # redémarrage : rattrape bulletins ouverts et résultats en attente
         if self.settings.pronostics_reconcile_seconds > 0:
             self._task = asyncio.create_task(self._reconcile_loop())
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # (re)connexion / redémarrage : relit les bulletins ouverts et les résultats en attente
+        if self.enabled:
+            await self._reconcile()
 
     async def cog_unload(self):
         if not self.enabled:
@@ -133,18 +140,21 @@ class ShamelessPronostics(commands.Cog):
         composition = composition_of(preview, series_id)
         if composition is None:
             return  # aucune Game ouverte : rien à proposer
-        if not await asyncio.to_thread(self.store.claim_bulletin, series_id, composition.game_number):
-            return  # bulletin déjà publié pour cette Game
 
+        # salon résolu AVANT la réservation (comme #15) : absent / inaccessible -> exception,
+        # la réservation n'est pas consommée et un retry peut publier le bulletin
         channel = await self._pronostics_channel()
-        try:
-            view = PronosticsView(composition, on_submit=self._submit)
-            await channel.send(embed=pronostics_embed(composition), view=view)
-            self._register_view(view)
-        except BaseException:
-            # pas publié -> on libère pour que le retry republie
-            await asyncio.shield(asyncio.to_thread(self.store.release_bulletin, series_id, composition.game_number))
-            raise
+        view = PronosticsView(composition, on_submit=self._submit)
+        if await asyncio.to_thread(self.store.claim_bulletin, series_id, composition.game_number):
+            try:
+                await channel.send(embed=pronostics_embed(composition), view=view)
+            except BaseException:
+                # pas publié -> on libère pour que le retry republie
+                await asyncio.shield(asyncio.to_thread(self.store.release_bulletin, series_id, composition.game_number))
+                raise
+        # publié ou déjà publié : la vue persistante est réenregistrée pour rester cliquable
+        # après un redémarrage (les menus survivent à la reconnexion)
+        self._register_view(view)
 
     def _register_view(self, view: PronosticsView) -> None:
         add_view = getattr(self.bot, "add_view", None)
@@ -254,6 +264,28 @@ class ShamelessPronostics(commands.Cog):
         """Re-vérifie les Games en attente : MVP/DOFD arrivent après la clôture des votes."""
         for game_id, series_id, _game_number in await asyncio.to_thread(self.store.pending):
             await self._announce_results(game_id, series_id)
+
+    async def _reconcile(self) -> None:
+        """Au boot et à chaque `on_ready` : rattrape ce qui a pu se perdre pendant l'arrêt.
+
+        Re-vérifie les résultats en attente, puis rouvre les bulletins des Séries connues :
+        la Game suivante a pu s'ouvrir pendant l'arrêt (aucun event reçu), ou le bulletin
+        d'une Game ouverte n'avait pas pu être publié. Chaque échec est logué sans casser
+        le chargement du cog."""
+        try:
+            await self.reconcile_pronostics()
+        except Exception:
+            logger.exception("shameless: re-vérification des résultats de pronostics échouée")
+        try:
+            series_ids = await asyncio.to_thread(self.store.bulletin_series)
+        except Exception:
+            logger.exception("shameless: lecture des Séries à rouvrir échouée")
+            return
+        for series_id in series_ids:
+            try:
+                await self._open_pronostics(series_id)
+            except Exception:
+                logger.exception("shameless: réouverture du bulletin de la Série %s échouée", series_id)
 
     async def _reconcile_loop(self) -> None:
         interval = self.settings.pronostics_reconcile_seconds

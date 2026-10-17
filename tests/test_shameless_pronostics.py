@@ -12,10 +12,13 @@ from tests.fakes import (
     ANNOUNCE,
     COMPOSITION_A,
     COMPOSITION_B,
+    GUILD_ID,
     PRONOSTICS,
     FakeBot,
+    FakeGuild,
     FakeInteraction,
     FakeMember,
+    choose,
     game_completed,
     game_pronostics,
     game_started,
@@ -263,6 +266,26 @@ async def test_a_spectator_builds_a_pronostic_that_is_transmitted_to_the_api(
     assert "enregistré" in interaction.content
 
 
+async def test_each_player_menu_updates_its_own_title_without_guessing_from_the_custom_id(
+    pronostics_guild, fake_bot, shameless_settings, fake_api, make_client, post_event
+):
+    _cog, _client, view = await open_bulletin(pronostics_guild, fake_bot, shameless_settings, fake_api, make_client, post_event)
+    interaction = FakeInteraction(user=FakeMember(500, name="Alice"))
+
+    # les callbacks réels des menus : le rôle passé à la construction décide du titre visé
+    await choose(view, view.mvp.custom_id, interaction, ["11"])
+    await choose(view, view.dofd.custom_id, interaction, ["21"])
+
+    assert put_payloads(fake_api)[-1] == {
+        "pronostiqueurDiscordId": "500",
+        "pronostiqueurNom": "Alice",
+        "gameNumber": 1,
+        "equipeGagnante": None,
+        "mvpPlayerId": 11,
+        "dofdPlayerId": 21,
+    }
+
+
 async def test_a_joueur_of_the_composition_cannot_pronosticate(
     pronostics_guild, fake_bot, shameless_settings, fake_api, make_client, post_event
 ):
@@ -458,3 +481,72 @@ async def test_the_proposal_survives_a_restart_without_republishing(
     await post_event(await make_client(rebooted, settings=settings), teams_formed(series_id=5))
 
     assert len(pronostics_guild.get_channel(PRONOSTICS).sent) == 1
+
+
+# =========================
+# RÉDEMARRAGE (réconciliation)
+# =========================
+
+async def test_a_bulletin_that_could_not_be_posted_is_not_consumed_so_a_retry_publishes_it(
+    pronostics_guild, fake_bot, shameless_settings, fake_api, make_client, post_event
+):
+    settings = pronostics_settings(shameless_settings)
+    fake_api.series_pronostics[5] = series_pronostics(series_id=5, game_number=1)
+    event = teams_formed(series_id=5)
+    # premier passage : le salon de pronostics n'existe pas encore -> publication impossible
+    blind = FakeBot(guilds=[FakeGuild(GUILD_ID)])
+    await load_pronostics(blind, settings, api=api_client(fake_api))
+    failed = await post_event(await make_client(blind, settings=settings), event)
+
+    assert failed.status_code == 500  # envoi Discord impossible : l'event n'est pas acquitté
+
+    # le salon existe : Shameless redélivre le même event et le bulletin part une seule fois
+    reader = FakeBot(guilds=[pronostics_guild])
+    await load_pronostics(reader, settings, api=api_client(fake_api))
+    retry = await post_event(await make_client(reader, settings=settings), event)
+
+    assert retry.json()["status"] == "processed"
+    assert len(pronostics_guild.get_channel(PRONOSTICS).sent) == 1
+
+
+async def test_a_restart_reopens_the_bulletin_of_the_next_game_left_open(
+    pronostics_guild, fake_bot, shameless_settings, fake_api, make_client, post_event
+):
+    settings = pronostics_settings(shameless_settings)
+    fake_api.series_pronostics[5] = series_pronostics(series_id=5, game_number=1)
+    await load_pronostics(fake_bot, settings, api=api_client(fake_api))
+    await post_event(await make_client(settings=settings), teams_formed(series_id=5))
+    channel = pronostics_guild.get_channel(PRONOSTICS)
+    assert [m["embed"].title for m in channel.sent] == ["🎯 Pronostics — Game 1"]
+
+    # pendant l'arrêt, la Game 1 s'est lancée/terminée : la Game 2 est ouverte aux pronostics
+    fake_api.series_pronostics[5] = series_pronostics(series_id=5, game_number=2)
+    rebooted = FakeBot(guilds=[pronostics_guild])
+    await load_pronostics(rebooted, settings, api=api_client(fake_api))
+
+    titles = [m["embed"].title for m in channel.sent]
+    assert titles == ["🎯 Pronostics — Game 1", "🎯 Pronostics — Game 2"]  # le bulletin ouvert est republié
+    assert rebooted.views  # et sa vue persistante est réenregistrée pour rester cliquable
+
+
+async def test_a_restart_announces_the_results_that_became_available_while_the_bot_was_down(
+    pronostics_guild, fake_bot, shameless_settings, fake_api, make_client, post_event
+):
+    settings = pronostics_settings(shameless_settings)
+    fake_api.series_pronostics[5] = series_pronostics(series_id=5, game_number=1)
+    fake_api.game_pronostics[1] = WINNER_KNOWN_ONLY
+    await load_pronostics(fake_bot, settings, api=api_client(fake_api))
+    client = await make_client(settings=settings)
+    await post_event(client, teams_formed(series_id=5))
+    await post_event(client, game_completed(game_id=1, series_id=5, winner="A"))
+    channel = pronostics_guild.get_channel(PRONOSTICS)
+    assert len(result_embeds(channel, "Vainqueur")) == 1
+    assert result_embeds(channel, "MVP") == []  # votes encore ouverts
+
+    # les votes se clôturent pendant l'arrêt : au redémarrage, MVP et DOFD sont annoncés
+    fake_api.game_pronostics[1] = EVERYTHING_KNOWN
+    rebooted = FakeBot(guilds=[pronostics_guild])
+    await load_pronostics(rebooted, settings, api=api_client(fake_api))
+
+    assert len(result_embeds(channel, "MVP")) == 1
+    assert len(result_embeds(channel, "DOFD")) == 1

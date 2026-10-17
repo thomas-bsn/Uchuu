@@ -17,6 +17,10 @@ from services.shameless_recap import GOLD
 TEAM_KEYS = ("A", "B")
 _NO_CHOICE = "-"
 
+# Rôle d'un menu Joueur : explicite, jamais déduit du `custom_id`
+ROLE_MVP = "mvp"
+ROLE_DOFD = "dofd"
+
 
 @dataclass(frozen=True)
 class PlayerChoice:
@@ -207,8 +211,8 @@ class PronosticsView(discord.ui.View):
         self._choices: dict[int, PronosticChoice] = {}
         prefix = f"pronostics:{composition.series_id}:{composition.game_number}"
         self.winner = _WinnerSelect(self, f"{prefix}:winner")
-        self.mvp = _PlayerSelect(self, f"{prefix}:mvp", "MVP pronostiqué")
-        self.dofd = _PlayerSelect(self, f"{prefix}:dofd", "DOFD pronostiqué")
+        self.mvp = _PlayerSelect(self, f"{prefix}:mvp", "MVP pronostiqué", role=ROLE_MVP)
+        self.dofd = _PlayerSelect(self, f"{prefix}:dofd", "DOFD pronostiqué", role=ROLE_DOFD)
         for item in (self.winner, self.mvp, self.dofd):
             self.add_item(item)
 
@@ -253,7 +257,7 @@ class _WinnerSelect(discord.ui.Select):
 
 
 class _PlayerSelect(discord.ui.Select):
-    def __init__(self, view: PronosticsView, custom_id: str, placeholder: str):
+    def __init__(self, view: PronosticsView, custom_id: str, placeholder: str, *, role: str):
         options = [discord.SelectOption(label=p.prenom, value=str(p.player_id)) for p in view.composition.players]
         options.append(discord.SelectOption(label="Aucune prédiction", value=_NO_CHOICE))
         super().__init__(
@@ -264,12 +268,12 @@ class _PlayerSelect(discord.ui.Select):
             options=options,
         )
         self._view = view
-        self._is_mvp = custom_id.endswith(":mvp")
+        self._role = role  # rôle explicite : jamais deviné depuis le custom_id
 
     async def callback(self, interaction):
         raw = _selected(self.values)
         player_id = None if raw is None else int(raw)
-        if self._is_mvp:
+        if self._role == ROLE_MVP:
             await self._view.select_mvp(interaction, player_id)
         else:
             await self._view.select_dofd(interaction, player_id)

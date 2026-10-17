@@ -76,6 +76,14 @@ class PronosticsStore(SqliteStore):
                 (series_id, game_number),
             )
 
+    def bulletin_series(self) -> list[int]:
+        """Les Séries pour lesquelles un bulletin a déjà été publié (à rouvrir au démarrage)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT series_id FROM shameless_pronostics_bulletins ORDER BY series_id"
+            ).fetchall()
+        return [series_id for (series_id,) in rows]
+
     def lock(self, series_id: int, game_number: int) -> None:
         with self._conn() as conn:
             conn.execute(
