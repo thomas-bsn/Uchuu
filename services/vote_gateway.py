@@ -7,28 +7,14 @@ Le fake des tests vit dans tests/vote_fakes.py.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Protocol
 
 import discord
 
+from services.vote_types import MemberInfo, MessageRef
 from views.vote_button import vote_view
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class MemberInfo:
-    id: int
-    role_ids: frozenset[int]
-    bot: bool = False
-    joined_at: float | None = None  # timestamp UTC d'arrivée sur le serveur
-
-
-@dataclass(frozen=True)
-class MessageRef:
-    channel_id: int
-    message_id: int
 
 
 def _member_info(member) -> MemberInfo:

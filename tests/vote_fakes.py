@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from services.vote_gateway import MemberInfo, MessageRef
+from services.vote_types import MemberInfo, MessageRef
 
 VALIDATION_CHANNEL_ID = 20
 
