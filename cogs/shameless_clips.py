@@ -1,6 +1,7 @@
 """Cog Shameless « Clips » : dépose sur l'API les vidéos postées dans SHAMELESS_CLIPS_CHANNEL_ID."""
 import logging
 
+import discord
 from discord.ext import commands
 
 from services.shameless_clips import ClipsDepositor
@@ -26,7 +27,14 @@ class ShamelessClips(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        await self.depositor.handle_message(message)
+        deposited = await self.depositor.handle_message(message)
+        if not deposited:
+            return
+        text = "✅ Clip enregistré" if len(deposited) == 1 else f"✅ {len(deposited)} clips enregistrés"
+        try:
+            await message.reply(text, mention_author=False)
+        except discord.HTTPException:
+            logger.exception("Confirmation du clip (message %s) non envoyée", message.id)
 
 
 async def setup(bot):
