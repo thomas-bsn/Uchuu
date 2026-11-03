@@ -2,6 +2,7 @@
 enregistrement des commandes et du /help. Aucun appel Discord réel : tout passe par des fakes."""
 import logging
 import sqlite3
+import sys
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -27,17 +28,6 @@ YEAR = 2026
 @pytest.fixture(autouse=True)
 def no_send_delay(monkeypatch):
     monkeypatch.setattr(santa, "SEND_DELAY_SECONDS", 0)
-
-
-@pytest.fixture(autouse=True)
-def fixed_year(monkeypatch):
-    class _Now:
-        @staticmethod
-        def now():
-            return SimpleNamespace(year=YEAR)
-
-    import cogs.secret_santa as cog_module
-    monkeypatch.setattr(cog_module, "datetime", _Now)
 
 
 # =========================
@@ -147,10 +137,10 @@ class FakeInteraction:
 class FakeAuthor:
     """ctx.author : ses MP vont dans ctx.outputs (pas dans user.dms, réservé aux MP de tirage)."""
 
-    def __init__(self, ctx, user, manage_guild):
+    def __init__(self, ctx, user, authorized):
         self._ctx = ctx
         self._user = user
-        self.guild_permissions = SimpleNamespace(manage_guild=manage_guild)
+        self.id = user.id if authorized else 9999  # 9999 : hors de la liste des organisateurs
 
     def __getattr__(self, name):
         return getattr(self._user, name)
@@ -166,12 +156,12 @@ class FakeCtx:
 
     prefix = "$$"
 
-    def __init__(self, guild, user, manage_guild=True, dm_closed=False):
+    def __init__(self, guild, user, authorized=True, dm_closed=False):
         self.guild = guild
         self.dm_closed = dm_closed
         self.outputs: list[tuple[str, str]] = []
         self.views: list = []
-        self.author = FakeAuthor(self, user, manage_guild)
+        self.author = FakeAuthor(self, user, authorized)
 
     def record(self, where, content, view=None):
         self.outputs.append((where, content))
@@ -194,10 +184,15 @@ def make_users(n):
 
 
 @pytest.fixture
-async def bot(bot_settings):
+async def bot(bot_settings, monkeypatch):
     instance = commands.Bot(command_prefix="$$", intents=discord.Intents.none())
     instance.settings = bot_settings
     await instance.load_extension("cogs.secret_santa")
+    # Le module est rechargé à chaque test (décharger l'extension le retire de sys.modules) :
+    # on patche celui que le cog utilise réellement.
+    cog_module = sys.modules["cogs.secret_santa"]
+    monkeypatch.setattr(cog_module, "ORGANIZER_IDS", frozenset(range(1, 500)))
+    monkeypatch.setattr(cog_module, "datetime", SimpleNamespace(now=lambda: SimpleNamespace(year=YEAR)))
     await instance.load_extension("commands.helps")
     instance.users_by_id = {}
 
@@ -398,12 +393,12 @@ async def test_draw_requires_permission_and_bot_access(cog, bot):
     users = make_users(3)
     guild, url = setup_server(bot, users, can_read=False)
 
-    denied = FakeCtx(guild, users[0], manage_guild=False)
+    denied = FakeCtx(guild, users[0], authorized=False)
     await cog.draw.callback(cog, denied, url, "🎅")
     no_access = FakeCtx(guild, users[0])
     await cog.draw.callback(cog, no_access, url, "🎅")
 
-    assert "Gérer le serveur" in denied.texts[-1]
+    assert "pas autorisé" in denied.texts[-1]
     assert "Lire l'historique" in no_access.texts[-1]
     assert not no_access.views
 
@@ -512,11 +507,11 @@ async def test_retry_is_reserved_to_the_organizer(cog, bot):
 
     other = FakeCtx(FakeGuild(users), users[2])  # admin, mais pas l'organisateur
     await cog.retry.callback(cog, other)
-    no_perm = FakeCtx(FakeGuild(users), users[0], manage_guild=False)
+    no_perm = FakeCtx(FakeGuild(users), users[0], authorized=False)
     await cog.retry.callback(cog, no_perm)
 
     assert "organisateur" in other.texts[-1]
-    assert "Gérer le serveur" in no_perm.texts[-1]
+    assert "pas autorisé" in no_perm.texts[-1]
     assert not users[1].dms
 
 
@@ -581,11 +576,11 @@ async def test_status_without_draw_and_with_progress(cog, bot):
 
 
 async def test_status_requires_permission(cog):
-    ctx = FakeCtx(FakeGuild([]), FakeUser(1), manage_guild=False)
+    ctx = FakeCtx(FakeGuild([]), FakeUser(1), authorized=False)
 
     await cog.status.callback(cog, ctx)
 
-    assert "Gérer le serveur" in ctx.texts[-1] and not ctx.texts_in("dm")
+    assert "pas autorisé" in ctx.texts[-1] and not ctx.texts_in("dm")
 
 
 # =========================
@@ -624,11 +619,11 @@ async def test_test_command_reports_explicit_dm_error(cog, failure, expected):
 
 async def test_test_command_is_restricted(cog):
     target = FakeUser(42)
-    ctx = FakeCtx(FakeGuild([target]), FakeUser(1), manage_guild=False)
+    ctx = FakeCtx(FakeGuild([target]), FakeUser(1), authorized=False)
 
     await cog.test.callback(cog, ctx, target)
 
-    assert not target.dms and "Gérer le serveur" in ctx.texts[-1]
+    assert not target.dms and "pas autorisé" in ctx.texts[-1]
 
 
 # =========================
@@ -701,3 +696,11 @@ def test_state_survives_restart_and_draw_stays_unique(shameless_db_path):
     assert not restarted.create_draw(GUILD_ID, YEAR, 2, people, derangement([p.id for p in people]))
     assert restarted.latest_draw(GUILD_ID) == (YEAR, 1)  # l'organisateur d'origine est conservé
     assert (shameless_db_path.stat().st_mode & 0o077) == 0
+
+
+def test_organizers_file_lists_only_valid_discord_ids():
+    from cogs.secret_santa import load_organizer_ids
+
+    ids = load_organizer_ids()
+
+    assert ids and all(isinstance(i, int) and i > 10**16 for i in ids)

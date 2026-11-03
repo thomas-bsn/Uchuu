@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -31,10 +32,21 @@ from shameless_config import ShamelessSettings
 
 logger = logging.getLogger(__name__)
 
+# Seuls ces comptes peuvent utiliser les commandes. Dans un fichier texte : un ID Discord n'a pas sa place dans du code.
+ORGANIZERS_FILE = Path(__file__).resolve().parent.parent / "include" / "secret_santa_organizers.txt"
+
+
+def load_organizer_ids(path: Path = ORGANIZERS_FILE) -> frozenset[int]:
+    lines = (line.split("#")[0].strip() for line in path.read_text(encoding="utf-8").splitlines())
+    return frozenset(int(line) for line in lines if line)
+
+
+ORGANIZER_IDS = load_organizer_ids()
+
 CONFIRM_TIMEOUT_SECONDS = 300
 MAX_LISTED = 40  # noms affichés avant « … et N autres » (limite de 2000 caractères par message)
 
-NOT_ORGANIZER = "⛔ Il faut la permission **Gérer le serveur** pour utiliser cette commande."
+NOT_ORGANIZER = "⛔ Tu n'es pas autorisé à utiliser cette commande."
 NOT_THE_ORGANIZER = "⛔ Seul l'organisateur de ce tirage peut relancer les envois."
 DM_CLOSED_FOR_ORGANIZER = (
     "❌ Je ne peux pas t'écrire en MP : les réponses du Secret Santa (listes, statut, résultats) "
@@ -141,7 +153,7 @@ class SecretSanta(commands.Cog):
 
     @staticmethod
     def _is_admin(ctx) -> bool:
-        return ctx.guild is not None and ctx.author.guild_permissions.manage_guild
+        return ctx.guild is not None and ctx.author.id in ORGANIZER_IDS
 
     async def _private(self, ctx, content: str, **kwargs) -> bool:
         """Envoie en MP à l'auteur de la commande ; accusé de réception dans le salon."""
@@ -176,7 +188,7 @@ class SecretSanta(commands.Cog):
         extras={
             "params": "user (optionnel) : utilisateur à contacter, toi par défaut",
             "examples": ["secret-santa test", "secret-santa test @Alice"],
-            "permission": "Gérer le serveur",
+            "permission": "Organisateur autorisé",
         },
     )
     async def test(self, ctx, user: discord.User = None):
@@ -203,7 +215,7 @@ class SecretSanta(commands.Cog):
         extras={
             "params": "message_url (requis) : lien du message d'inscription ; emoji (requis) : emoji d'inscription",
             "examples": ["secret-santa draw https://discord.com/channels/123/456/789 🎅"],
-            "permission": "Gérer le serveur ; le bot doit voir le salon et lire l'historique du message",
+            "permission": "Organisateur autorisé ; le bot doit voir le salon et lire l'historique du message",
         },
     )
     async def draw(self, ctx, message_url: str, emoji: str):
@@ -276,7 +288,7 @@ class SecretSanta(commands.Cog):
     @secret_santa.command(
         name="status",
         help="État du Secret Santa (sans les attributions)",
-        extras={"examples": ["secret-santa status"], "permission": "Gérer le serveur"},
+        extras={"examples": ["secret-santa status"], "permission": "Organisateur autorisé"},
     )
     async def status(self, ctx):
         if not self._is_admin(ctx):
