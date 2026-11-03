@@ -119,37 +119,22 @@ class FakeChannel:
 
 
 class FakeInteraction:
-    """Enregistre tout ce que l'utilisateur verrait, avec le flag éphémère."""
+    """Clic sur un bouton : enregistre ce que l'utilisateur verrait."""
 
-    def __init__(self, guild, user, manage_guild=True):
+    def __init__(self, guild, user):
         self.guild = guild
         self.user = user
-        self.permissions = SimpleNamespace(manage_guild=manage_guild)
         self.outputs: list[tuple[str, bool]] = []  # (texte, éphémère)
-        self.views: list = []
         outer = self
 
         class Response:
-            async def send_message(self, content=None, *, ephemeral=False, view=None, **kw):
-                outer.record(content, ephemeral, view)
-
-            async def defer(self, *, ephemeral=False, thinking=False):
-                pass
+            async def send_message(self, content=None, *, ephemeral=False, **kw):
+                outer.outputs.append((content, ephemeral))
 
             async def edit_message(self, *, content=None, view=None):
-                outer.record(content, True, None)
-
-        class Followup:
-            async def send(self, content=None, *, ephemeral=False, view=None, **kw):
-                outer.record(content, ephemeral, view)
+                outer.outputs.append((content, True))
 
         self.response = Response()
-        self.followup = Followup()
-
-    def record(self, content, ephemeral, view):
-        self.outputs.append((content, ephemeral))
-        if view is not None:
-            self.views.append(view)
 
     async def edit_original_response(self, *, content=None, **kw):
         self.outputs.append((content, True))
@@ -157,6 +142,51 @@ class FakeInteraction:
     @property
     def texts(self):
         return [text for text, _ in self.outputs]
+
+
+class FakeAuthor:
+    """ctx.author : ses MP vont dans ctx.outputs (pas dans user.dms, réservé aux MP de tirage)."""
+
+    def __init__(self, ctx, user, manage_guild):
+        self._ctx = ctx
+        self._user = user
+        self.guild_permissions = SimpleNamespace(manage_guild=manage_guild)
+
+    def __getattr__(self, name):
+        return getattr(self._user, name)
+
+    async def send(self, content, view=None, **kw):
+        if self._ctx.dm_closed:
+            raise http_error(discord.Forbidden)
+        self._ctx.record("dm", content, view)
+
+
+class FakeCtx:
+    """Contexte d'une commande à préfixe : outputs = [(\"channel\"|\"dm\", texte)]."""
+
+    prefix = "$$"
+
+    def __init__(self, guild, user, manage_guild=True, dm_closed=False):
+        self.guild = guild
+        self.dm_closed = dm_closed
+        self.outputs: list[tuple[str, str]] = []
+        self.views: list = []
+        self.author = FakeAuthor(self, user, manage_guild)
+
+    def record(self, where, content, view=None):
+        self.outputs.append((where, content))
+        if view is not None:
+            self.views.append(view)
+
+    async def send(self, content=None, **kw):
+        self.record("channel", content)
+
+    def texts_in(self, where):
+        return [text for w, text in self.outputs if w == where]
+
+    @property
+    def texts(self):
+        return [text for _, text in self.outputs]
 
 
 def make_users(n):
@@ -194,15 +224,17 @@ def setup_server(bot, users, *, emoji="🎅", extra_reactors=(), can_read=True):
 
 
 async def prepare_draw(cog, bot, users, **kw):
-    """Joue /secret-santa draw et renvoie (interaction, vue de confirmation)."""
+    """Joue `$$secret-santa draw` et renvoie (ctx, vue de confirmation)."""
     guild, url = setup_server(bot, users, **kw)
-    interaction = FakeInteraction(guild, users[0])
-    await cog.draw.callback(cog, interaction, url, "🎅")
-    return interaction, (interaction.views[0] if interaction.views else None)
+    ctx = FakeCtx(guild, users[0])
+    await cog.draw.callback(cog, ctx, url, "🎅")
+    return ctx, (ctx.views[0] if ctx.views else None)
 
 
 async def full_draw(cog, bot, users, **kw):
-    interaction, view = await prepare_draw(cog, bot, users, **kw)
+    """Tirage confirmé ; renvoie l'interaction du clic (ce que voit l'organisateur à la fin)."""
+    ctx, view = await prepare_draw(cog, bot, users, **kw)
+    interaction = FakeInteraction(ctx.guild, users[0])
     await view.confirm.callback(interaction)
     return interaction
 
@@ -311,33 +343,44 @@ async def test_emoji_variation_selector_and_missing_emoji():
 
 
 # =========================
-# /secret-santa draw : workflow et confirmation
+# $$secret-santa draw : workflow et confirmation
 # =========================
 
-async def test_draw_command_lists_participants_ephemerally_and_does_not_draw(cog, bot):
+async def test_draw_command_lists_participants_privately_and_does_not_draw(cog, bot):
     users = make_users(4)
 
-    interaction, view = await prepare_draw(cog, bot, users, extra_reactors=[FakeUser(99, bot=True)])
+    ctx, view = await prepare_draw(cog, bot, users, extra_reactors=[FakeUser(99, bot=True)])
 
-    text, ephemeral = interaction.outputs[-1]
-    assert ephemeral and "4 participants" in text
-    assert all(u.name in text for u in users)
+    (listing,) = ctx.texts_in("dm")  # la liste part en MP à l'organisateur
+    assert "4 participants" in listing and all(u.name in listing for u in users)
+    assert not any(u.name in text for u in users for text in ctx.texts_in("channel"))  # pas dans le salon
     assert view is not None
-    assert all(not u.dms for u in users)  # aucun MP avant confirmation
+    assert all(not u.dms for u in users)  # aucun MP de tirage avant confirmation
     assert not cog.store.draw_exists(GUILD_ID, YEAR)
 
 
 async def test_draw_needs_two_participants(cog, bot):
-    interaction, view = await prepare_draw(cog, bot, make_users(1))
+    ctx, view = await prepare_draw(cog, bot, make_users(1))
 
-    assert view is None and "au moins 2" in interaction.texts[-1]
+    assert view is None and "au moins 2" in ctx.texts[-1]
+
+
+async def test_draw_with_closed_dms_explains_and_draws_nothing(cog, bot):
+    users = make_users(3)
+    guild, url = setup_server(bot, users)
+    ctx = FakeCtx(guild, users[0], dm_closed=True)
+
+    await cog.draw.callback(cog, ctx, url, "🎅")
+
+    assert "Ouvre tes MP" in ctx.texts[-1] and not ctx.views
+    assert not cog.store.draw_exists(GUILD_ID, YEAR)
 
 
 async def test_cancel_sends_nothing(cog, bot):
     users = make_users(3)
-    interaction, view = await prepare_draw(cog, bot, users)
+    ctx, view = await prepare_draw(cog, bot, users)
 
-    await view.cancel.callback(interaction)
+    await view.cancel.callback(FakeInteraction(ctx.guild, users[0]))
 
     assert all(not u.dms for u in users)
     assert not cog.store.draw_exists(GUILD_ID, YEAR)
@@ -346,9 +389,8 @@ async def test_cancel_sends_nothing(cog, bot):
 async def test_confirmation_is_reserved_to_the_organizer(cog, bot):
     users = make_users(3)
     _, view = await prepare_draw(cog, bot, users)
-    intruder = FakeInteraction(FakeGuild([]), FakeUser(777))
 
-    assert await view.interaction_check(intruder) is False
+    assert await view.interaction_check(FakeInteraction(FakeGuild([]), FakeUser(777))) is False
     assert await view.interaction_check(FakeInteraction(FakeGuild([]), users[0])) is True
 
 
@@ -356,14 +398,27 @@ async def test_draw_requires_permission_and_bot_access(cog, bot):
     users = make_users(3)
     guild, url = setup_server(bot, users, can_read=False)
 
-    denied = FakeInteraction(guild, users[0], manage_guild=False)
+    denied = FakeCtx(guild, users[0], manage_guild=False)
     await cog.draw.callback(cog, denied, url, "🎅")
-    no_access = FakeInteraction(guild, users[0])
+    no_access = FakeCtx(guild, users[0])
     await cog.draw.callback(cog, no_access, url, "🎅")
 
     assert "Gérer le serveur" in denied.texts[-1]
     assert "Lire l'historique" in no_access.texts[-1]
     assert not no_access.views
+
+
+async def test_draw_rejects_bad_or_foreign_links(cog, bot):
+    users = make_users(3)
+    guild, _ = setup_server(bot, users)
+    bad = FakeCtx(guild, users[0])
+    foreign = FakeCtx(guild, users[0])
+
+    await cog.draw.callback(cog, bad, "pas un lien", "🎅")
+    await cog.draw.callback(cog, foreign, "https://discord.com/channels/999/2000/3000", "🎅")
+
+    assert "Lien invalide" in bad.texts[-1]
+    assert "pas sur ce serveur" in foreign.texts[-1]
 
 
 async def test_confirmed_draw_sends_every_dm_with_the_right_format(cog, bot):
@@ -385,9 +440,9 @@ async def test_double_execution_is_refused(cog, bot):
     dms_after_first = [len(u.dms) for u in users]
     assignments_after_first = received(users)
 
-    second_interaction, second_view = await prepare_draw(cog, bot, users)
+    second_ctx, second_view = await prepare_draw(cog, bot, users)
 
-    assert second_view is None and "existe déjà" in second_interaction.texts[-1]
+    assert second_view is None and "existe déjà" in second_ctx.texts[-1]
     # Même en contournant la vérification amont (deux confirmations simultanées) :
     text = await cog.execute_draw(GUILD_ID, ORGANIZER_ID, [Participant(u.id, u.name) for u in users])
     assert "existe déjà" in text
@@ -398,7 +453,8 @@ async def test_double_execution_is_refused(cog, bot):
 
 async def test_double_click_on_confirm_draws_once(cog, bot):
     users = make_users(3)
-    interaction, view = await prepare_draw(cog, bot, users)
+    ctx, view = await prepare_draw(cog, bot, users)
+    interaction = FakeInteraction(ctx.guild, users[0])
 
     await view.confirm.callback(interaction)
     await view.confirm.callback(interaction)
@@ -418,6 +474,7 @@ async def test_failed_dm_keeps_assignments_and_never_redraws(cog, bot):
 
     result = interaction.texts[-1]
     assert "4/5" in result and users[2].name in result and "MP fermés" in result
+    assert "$$secret-santa retry" in result  # le préfixe du bot, pas un slash
     assert len(received(users)) == 4
     sent, waiting = cog.store.progress(GUILD_ID, YEAR)
     assert sent == 4 and [w[0] for w in waiting] == [users[2].id]
@@ -434,15 +491,15 @@ async def test_retry_resends_only_failed_dms_without_new_draw(cog, bot):
     before = {u.id: list(u.dms) for u in users}
     users[2].failure = None  # l'utilisateur a rouvert ses MP
 
-    retry = FakeInteraction(FakeGuild(users), users[0])
+    retry = FakeCtx(FakeGuild(users), users[0])
     await cog.retry.callback(cog, retry)
 
-    assert "1/1" in retry.texts[-1]
+    assert "1/1" in retry.texts_in("dm")[-1]
     assert users[2].dms and f"**@{secret_row[1]}**" in users[2].dms[0]  # l'attribution d'origine
     assert all(u.dms == before[u.id] for u in users if u is not users[2])  # personne d'autre re-contacté
     assert cog.store.progress(GUILD_ID, YEAR) == (5, [])
 
-    again = FakeInteraction(FakeGuild(users), users[0])
+    again = FakeCtx(FakeGuild(users), users[0])
     await cog.retry.callback(cog, again)
     assert "déjà été envoyés" in again.texts[-1] and len(users[2].dms) == 1
 
@@ -453,9 +510,9 @@ async def test_retry_is_reserved_to_the_organizer(cog, bot):
     await full_draw(cog, bot, users)
     users[1].failure = None
 
-    other = FakeInteraction(FakeGuild(users), users[2])  # admin, mais pas l'organisateur
+    other = FakeCtx(FakeGuild(users), users[2])  # admin, mais pas l'organisateur
     await cog.retry.callback(cog, other)
-    no_perm = FakeInteraction(FakeGuild(users), users[0], manage_guild=False)
+    no_perm = FakeCtx(FakeGuild(users), users[0], manage_guild=False)
     await cog.retry.callback(cog, no_perm)
 
     assert "organisateur" in other.texts[-1]
@@ -467,8 +524,7 @@ async def test_deliver_pending_survives_unknown_user(cog, bot):
     users = make_users(3)
     await full_draw(cog, bot, users)
     # un MP en attente dont le compte n'existe plus ne bloque pas les autres
-    store = cog.store
-    with store._conn() as conn:
+    with cog.store._conn() as conn:
         conn.execute("UPDATE secret_santa_assignments SET sent_at = NULL, recipient_id = 5, recipient_name = 'x'")
 
     async def resolve(user_id):
@@ -476,7 +532,7 @@ async def test_deliver_pending_survives_unknown_user(cog, bot):
             raise discord.NotFound(SimpleNamespace(status=404, reason="x"), "gone")
         return users[user_id - ORGANIZER_ID]
 
-    report = await deliver_pending(store, resolve, GUILD_ID, YEAR)
+    report = await deliver_pending(cog.store, resolve, GUILD_ID, YEAR)
 
     assert report.sent == 2 and [f[0] for f in report.failed] == [users[0].id]
 
@@ -491,14 +547,13 @@ async def test_assignments_never_leak_in_responses_logs_or_database(cog, bot, ca
     caplog.set_level(logging.DEBUG)
 
     draw = await full_draw(cog, bot, users)
-    status = FakeInteraction(FakeGuild(users), users[0])
+    status = FakeCtx(FakeGuild(users), users[0])
     await cog.status.callback(cog, status)
     failing_recipient = sqlite3.connect(cog.store.db_path).execute(
         "SELECT recipient_name FROM secret_santa_assignments WHERE giver_id = ?", (users[4].id,)
     ).fetchone()[0]
 
-    for text, ephemeral in draw.outputs + status.outputs:
-        assert ephemeral
+    for text in draw.texts + status.texts:
         assert "pour offrir un cadeau" not in text
     final = draw.texts[-1] + status.texts[-1]
     assert users[4].name in final and failing_recipient not in final.replace(users[4].name, "")
@@ -514,75 +569,82 @@ async def test_assignments_never_leak_in_responses_logs_or_database(cog, bot, ca
 
 async def test_status_without_draw_and_with_progress(cog, bot):
     users = make_users(3)
-    before = FakeInteraction(FakeGuild(users), users[0])
+    before = FakeCtx(FakeGuild(users), users[0])
     await cog.status.callback(cog, before)
     await full_draw(cog, bot, users)
-    after = FakeInteraction(FakeGuild(users), users[0])
+    after = FakeCtx(FakeGuild(users), users[0])
     await cog.status.callback(cog, after)
 
     assert "Aucun tirage" in before.texts[-1]
-    assert "3/3" in after.texts[-1]
-    assert all(ephemeral for _, ephemeral in after.outputs)
+    assert "3/3" in after.texts_in("dm")[-1]
+    assert not any("3/3" in text for text in after.texts_in("channel"))  # le salon ne reçoit qu'un accusé
+
+
+async def test_status_requires_permission(cog):
+    ctx = FakeCtx(FakeGuild([]), FakeUser(1), manage_guild=False)
+
+    await cog.status.callback(cog, ctx)
+
+    assert "Gérer le serveur" in ctx.texts[-1] and not ctx.texts_in("dm")
 
 
 # =========================
-# /secret-santa test
+# $$secret-santa test
 # =========================
 
-async def test_test_command_sends_the_test_dm_and_changes_no_state(cog, bot):
+async def test_test_command_sends_the_test_dm_and_changes_no_state(cog):
     target = FakeUser(42, name="Cible")
-    interaction = FakeInteraction(FakeGuild([target]), FakeUser(1))
+    ctx = FakeCtx(FakeGuild([target]), FakeUser(1))
 
-    await cog.test.callback(cog, interaction, target)
+    await cog.test.callback(cog, ctx, target)
 
     assert target.dms == [santa.TEST_DM]
-    assert "accepté" in interaction.texts[-1] and interaction.outputs[-1][1]
+    assert "accepté" in ctx.texts[-1]
     assert not cog.store.draw_exists(GUILD_ID, YEAR)
     assert cog.store.latest_draw(GUILD_ID) is None
 
 
 async def test_test_command_defaults_to_the_caller(cog):
-    caller = FakeUser(1, name="Moi")
-    interaction = FakeInteraction(FakeGuild([caller]), caller)
+    ctx = FakeCtx(FakeGuild([]), FakeUser(1, name="Moi"))
 
-    await cog.test.callback(cog, interaction, None)
+    await cog.test.callback(cog, ctx, None)
 
-    assert caller.dms == [santa.TEST_DM]
+    assert ctx.texts_in("dm") == [santa.TEST_DM]  # envoyé à celui qui a lancé la commande
 
 
 @pytest.mark.parametrize("failure, expected", [(discord.Forbidden, "MP fermés"), (discord.HTTPException, "erreur Discord")])
 async def test_test_command_reports_explicit_dm_error(cog, failure, expected):
     target = FakeUser(42, failure=failure)
-    interaction = FakeInteraction(FakeGuild([target]), FakeUser(1))
+    ctx = FakeCtx(FakeGuild([target]), FakeUser(1))
 
-    await cog.test.callback(cog, interaction, target)
+    await cog.test.callback(cog, ctx, target)
 
-    assert "❌" in interaction.texts[-1] and expected in interaction.texts[-1]
+    assert "❌" in ctx.texts[-1] and expected in ctx.texts[-1]
 
 
 async def test_test_command_is_restricted(cog):
     target = FakeUser(42)
-    interaction = FakeInteraction(FakeGuild([target]), FakeUser(1), manage_guild=False)
+    ctx = FakeCtx(FakeGuild([target]), FakeUser(1), manage_guild=False)
 
-    await cog.test.callback(cog, interaction, target)
+    await cog.test.callback(cog, ctx, target)
 
-    assert not target.dms and "Gérer le serveur" in interaction.texts[-1]
+    assert not target.dms and "Gérer le serveur" in ctx.texts[-1]
 
 
 # =========================
-# ENREGISTREMENT ET /help
+# ENREGISTREMENT ET help
 # =========================
 
-def test_commands_registered_as_guild_only_group(bot):
-    group = next(c for c in bot.tree.get_commands() if c.name == "secret-santa")
+def test_commands_registered_on_the_bot_prefix_group(bot):
+    group = bot.get_command("secret-santa")
 
     assert {c.name for c in group.commands} == {"test", "draw", "status", "retry"}
-    assert group.guild_only
-    assert [p.name for p in group.get_command("draw").parameters] == ["message_url", "emoji"]
-    assert [p.name for p in group.get_command("test").parameters] == ["user"]
+    assert not bot.tree.get_commands()  # plus aucune slash command
+    assert list(bot.get_command("secret-santa draw").clean_params) == ["message_url", "emoji"]
+    assert list(bot.get_command("secret-santa test").clean_params) == ["user"]
 
 
-class FakeCtx:
+class FakeHelpCtx:
     def __init__(self):
         self.sent = []
 
@@ -593,27 +655,28 @@ class FakeCtx:
 async def test_help_lists_secret_santa_and_details_it(bot):
     helper = bot.get_cog("Help")
 
-    overview = FakeCtx()
+    overview = FakeHelpCtx()
     await helper.help_command.callback(helper, overview)
-    detail = FakeCtx()
+    detail = FakeHelpCtx()
     await helper.help_command.callback(helper, detail, "secret-santa")
 
-    listing = "\n".join(overview.sent)
-    assert "/secret-santa draw" in listing and "/secret-santa test" in listing
+    assert "secret-santa" in "\n".join(overview.sent)
     text = "\n".join(detail.sent)
-    for expected in ("/secret-santa test", "/secret-santa draw <message_url> <emoji>", "/secret-santa status",
-                     "/secret-santa retry", "Exemple", "Permission", "requis", "optionnel"):
+    for expected in ("secret-santa test", "secret-santa draw <message_url> <emoji>", "secret-santa status",
+                     "secret-santa retry", "Exemple : `$$secret-santa draw", "Permission", "Paramètres"):
         assert expected in text
     assert all(len(chunk) <= 2000 for chunk in overview.sent + detail.sent)
 
 
-async def test_help_unknown_command_names_it(bot):
+async def test_help_detail_of_a_subcommand_and_unknown_command(bot):
     helper = bot.get_cog("Help")
-    ctx = FakeCtx()
+    sub, unknown = FakeHelpCtx(), FakeHelpCtx()
 
-    await helper.help_command.callback(helper, ctx, "nimportequoi")
+    await helper.help_command.callback(helper, sub, "secret-santa", "retry")
+    await helper.help_command.callback(helper, unknown, "nimportequoi")
 
-    assert "`nimportequoi` n'existe pas" in ctx.sent[0]
+    assert "Organisateur du tirage uniquement" in sub.sent[0]
+    assert "`nimportequoi` n'existe pas" in unknown.sent[0]
 
 
 def test_secret_santa_extension_is_loaded_at_startup():

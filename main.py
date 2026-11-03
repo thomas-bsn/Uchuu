@@ -40,9 +40,6 @@ class MyBot(commands.Bot):
         for ext in EXTENSIONS:
             await self.load_extension(ext)
 
-        # Les slash commands n'existent côté Discord qu'après synchronisation de l'arbre
-        await self.tree.sync()
-
     async def on_ready(self):
         print(f"{self.user.name} est prêt.")
         await self.change_presence(activity=discord.Game(self.settings.discord.status))
