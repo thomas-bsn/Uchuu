@@ -1,6 +1,26 @@
+x-image: &image ${UCHUU_IMAGE:-ghcr.io/thomas-bsn/uchuu:latest}
+
 services:
+  # Tâche unique, lancée à chaque `docker compose up` avant le bot : récupère la dernière image
+  # publiée par la CI. Si elle a changé, `bot` est recréé avec (compose compare l'image du
+  # conteneur à l'image locale quand il converge le service). Hors ligne ou registre injoignable :
+  # on garde l'image déjà présente et le bot démarre quand même.
+  # Monte le socket Docker (accès root à l'hôte) : image `docker:cli` officielle, rien d autre dedans.
+  migrate:
+    image: docker:27-cli
+    command: ["sh", "-c", "docker pull \"$$UCHUU_IMAGE\" || echo 'pull impossible : image locale conservée'"]
+    environment:
+      UCHUU_IMAGE: *image
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: "no"
+
   bot:
+    image: *image
     build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     # Secrets / IDs fournis par l'environnement de déploiement, jamais dans l'image
     env_file:
