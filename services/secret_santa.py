@@ -52,14 +52,13 @@ def dm_text(year: int, giver_name: str, recipient_name: str) -> str:
     )
 
 
-def info_text(year: int, budget: str) -> str:
+def info_text(year: int) -> str:
     return (
         f"🎄 **SECRET SANTA {year}** 🎁\n\n"
         "Quelques infos pour ton cadeau :\n\n"
-        f"💰 **Budget** : {budget}\n\n"
-        "📅 **Révélation** : dans la nuit du 24 au 25 décembre.\n\n"
+        "💰 **Budget** : libre, tu offres ce que tu veux (même une chaussette 🧦).\n\n"
         "📦 **Livraison** : tu fais comme tu veux, en main propre sur place ou par la poste.\n\n"
-        "🎙️ **Vocal** : rendez-vous dimanche 20 décembre ; si tu ne peux pas être là, pas de souci."
+        "🎙️ **Révélation** : dimanche 20 décembre, en vocal. Si tu ne peux pas être là, pas de souci."
     )
 
 
@@ -364,8 +363,8 @@ async def deliver_pending(store: SecretSantaStore, resolve_user, guild_id: int, 
     return DeliveryReport(sent, failed)
 
 
-async def deliver_info(store: SecretSantaStore, resolve_user, guild_id: int, year: int, budget: str) -> DeliveryReport:
-    """Envoie le 2e message (budget, dates) aux participants qui ne l'ont pas encore reçu.
+async def deliver_info(store: SecretSantaStore, resolve_user, guild_id: int, year: int) -> DeliveryReport:
+    """Envoie le 2e message (budget libre, date, livraison) aux participants qui ne l'ont pas encore reçu.
 
     Réexécutable : un participant déjà servi n'est jamais recontacté. Ne touche pas aux attributions."""
     pending = await asyncio.to_thread(store.info_pending, guild_id, year)
@@ -382,7 +381,7 @@ async def deliver_info(store: SecretSantaStore, resolve_user, guild_id: int, yea
         except discord.HTTPException:
             failed.append((giver_id, giver_name, FailureReason.DISCORD_ERROR))
             continue
-        reason = await send_dm(user, info_text(year, budget))
+        reason = await send_dm(user, info_text(year))
         if reason is None:
             await asyncio.to_thread(store.mark_info_sent, guild_id, year, giver_id)
             sent += 1

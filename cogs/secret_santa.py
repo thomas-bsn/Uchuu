@@ -354,20 +354,14 @@ class SecretSanta(commands.Cog):
 
     @secret_santa.command(
         name="info",
-        help="Envoie à tous les participants le budget, la date de révélation et le vocal (confirmation requise)",
-        usage="<budget>",
+        help="Envoie à tous les participants les infos (budget libre, livraison, vocal du dimanche 20 décembre) ; confirmation requise",
         extras={
-            "params": "budget (requis) : texte libre repris tel quel dans le message",
-            "examples": ["secret-santa info 20€ maximum"],
+            "examples": ["secret-santa info"],
             "permission": "Organisateur autorisé ; un tirage doit avoir eu lieu",
         },
     )
-    async def info(self, ctx, *, budget: str):
+    async def info(self, ctx):
         if not await self._allowed(ctx):
-            return
-        budget = budget.strip()
-        if len(budget) > 100:
-            await ctx.send("❌ Budget trop long (100 caractères max).")
             return
         guild_id = ctx.guild.id
         latest = await asyncio.to_thread(self.store.latest_draw, guild_id)
@@ -382,19 +376,19 @@ class SecretSanta(commands.Cog):
 
         async def send_all() -> str:
             async with self._lock(guild_id):
-                report = await deliver_info(self.store, self.bot.fetch_user, guild_id, year, budget)
+                report = await deliver_info(self.store, self.bot.fetch_user, guild_id, year)
             if not report.failed:
                 return f"✅ Message envoyé à **{report.sent}** participant(s)."
             return (
                 f"📬 **{report.sent}** envoyé(s).\n"
-                f"⚠️ **{len(report.failed)}** MP en échec — relance `{ctx.prefix}secret-santa info {budget}` "
+                f"⚠️ **{len(report.failed)}** MP en échec — relance `{ctx.prefix}secret-santa info` "
                 "(seuls ceux qui ne l'ont pas reçu sont recontactés) :\n"
                 + "\n".join(f"• <@{g}> ({n}) : {r.value}" for g, n, r in report.failed)
             )
 
         view = ConfirmView(ctx.author.id, send_all, f"Envoyer à {len(pending)} participant(s)",
                            "❌ Erreur inattendue pendant l'envoi. Relance la commande : personne ne reçoit le message deux fois.")
-        await self._private(ctx, f"Aperçu du message envoyé à **{len(pending)}** participant(s) :\n\n{info_text(year, budget)}", view=view)
+        await self._private(ctx, f"Aperçu du message envoyé à **{len(pending)}** participant(s) :\n\n{info_text(year)}", view=view)
 
     @secret_santa.command(
         name="off",

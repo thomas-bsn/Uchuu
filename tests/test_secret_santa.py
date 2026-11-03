@@ -634,9 +634,9 @@ def infos_received(users):
     return {u.id: [dm for dm in u.dms if "Budget" in dm] for u in users}
 
 
-async def run_info(cog, users, budget="20€ maximum", user=None, confirm=True):
+async def run_info(cog, users, user=None, confirm=True):
     ctx = FakeCtx(FakeGuild(users), user or users[0])
-    await cog.info.callback(cog, ctx, budget=budget)
+    await cog.info.callback(cog, ctx)
     if confirm and ctx.views:
         await ctx.views[0].confirm.callback(FakeInteraction(ctx.guild, users[0]))
     return ctx
@@ -649,8 +649,9 @@ async def test_info_previews_then_sends_to_every_participant_once(cog, bot):
     preview = await run_info(cog, users, confirm=False)
 
     (text,) = preview.texts_in("dm")  # l'aperçu part en MP à l'organisateur
-    for expected in ("20€ maximum", "nuit du 24 au 25 décembre", "en main propre sur place ou par la poste", "dimanche 20 décembre"):
+    for expected in ("Budget** : libre", "chaussette", "en main propre sur place ou par la poste", "dimanche 20 décembre, en vocal"):
         assert expected in text
+    assert "24" not in text and "€" not in text
     assert not any(infos_received(users).values())  # rien n'est parti avant confirmation
 
     await run_info(cog, users)
@@ -692,12 +693,12 @@ async def test_info_needs_a_draw_and_authorization(cog, bot):
     users = make_users(3)
     no_draw = await run_info(cog, users)
     await full_draw(cog, bot, users)
-    stranger = await run_info(cog, users, user=users[1])  # autorisé : ok
+    second_admin = await run_info(cog, users, user=users[1])  # autre ID autorisé : ok
     denied = FakeCtx(FakeGuild(users), users[0], authorized=False)
-    await cog.info.callback(cog, denied, budget="10€")
+    await cog.info.callback(cog, denied)
 
     assert "Aucun tirage" in no_draw.texts[-1]
-    assert stranger.views
+    assert second_admin.views
     assert "pas autorisé" in denied.texts[-1]
 
 
@@ -715,7 +716,7 @@ async def test_off_blocks_every_command_and_on_restores_them(cog, bot):
     draw_ctx = FakeCtx(*(setup_server(bot, users)[0], users[0]))
     await cog.draw.callback(cog, draw_ctx, "https://discord.com/channels/1000/2000/3000", "🎅")
     info_ctx = FakeCtx(FakeGuild(users), users[0])
-    await cog.info.callback(cog, info_ctx, budget="20€")
+    await cog.info.callback(cog, info_ctx)
 
     assert "désactivé" in off.texts[-1]
     assert all("désactivé" in ctx.texts[-1] for ctx in [*blocked, draw_ctx, info_ctx])
