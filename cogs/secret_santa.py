@@ -23,8 +23,10 @@ from services.secret_santa import (
     Participant,
     SecretSantaStore,
     collect_participants,
+    deliver_info,
     deliver_pending,
     derangement,
+    info_text,
     parse_message_url,
     send_dm,
 )
@@ -71,16 +73,17 @@ def delivery_summary(report: DeliveryReport, total: int, prefix: str) -> str:
     return f"📬 **{report.sent}/{total}** MP envoyés.\n{failure_summary(report, prefix)}"
 
 
-class ConfirmDrawView(discord.ui.View):
-    """Seul l'organisateur qui a lancé la commande peut cliquer ; usage unique."""
+class ConfirmView(discord.ui.View):
+    """Bouton de confirmation : seul celui qui a lancé la commande peut cliquer, usage unique.
+    `action()` renvoie le texte final ; une exception inattendue affiche `error_text`."""
 
-    def __init__(self, cog: "SecretSanta", organizer_id: int, guild_id: int, participants: list[Participant]):
+    def __init__(self, organizer_id: int, action, confirm_label: str, error_text: str):
         super().__init__(timeout=CONFIRM_TIMEOUT_SECONDS)
-        self.cog = cog
         self.organizer_id = organizer_id
-        self.guild_id = guild_id
-        self.participants = participants
+        self.action = action
+        self.error_text = error_text
         self.used = False
+        self.confirm.label = confirm_label
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.organizer_id:
@@ -88,30 +91,26 @@ class ConfirmDrawView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Lancer le tirage", style=discord.ButtonStyle.danger, emoji="🎁")
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="🎁")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.used:  # double clic
-            await interaction.response.send_message("Tirage déjà en cours.", ephemeral=True)
+            await interaction.response.send_message("Déjà en cours.", ephemeral=True)
             return
         self.used = True
         self.stop()
-        await interaction.response.edit_message(content="⏳ Tirage et envoi des MP en cours…", view=None)
+        await interaction.response.edit_message(content="⏳ Envoi des MP en cours…", view=None)
         try:
-            text = await self.cog.execute_draw(self.guild_id, self.organizer_id, self.participants)
+            text = await self.action()
         except Exception:
-            logger.exception("secret santa : échec inattendu pendant le tirage")
-            p = self.cog.prefix
-            text = (
-                f"❌ Erreur inattendue pendant le tirage. Vérifie `{p}secret-santa status` : "
-                f"si le tirage est enregistré, utilise `{p}secret-santa retry` (jamais de nouveau tirage)."
-            )
+            logger.exception("secret santa : échec inattendu pendant l'action confirmée")
+            text = self.error_text
         await interaction.edit_original_response(content=text)
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.used = True
         self.stop()
-        await interaction.response.edit_message(content="Tirage annulé. Rien n'a été envoyé.", view=None)
+        await interaction.response.edit_message(content="Annulé. Rien n'a été envoyé.", view=None)
 
 
 class SecretSanta(commands.Cog):
@@ -155,6 +154,16 @@ class SecretSanta(commands.Cog):
     def _is_admin(ctx) -> bool:
         return ctx.guild is not None and ctx.author.id in ORGANIZER_IDS
 
+    async def _allowed(self, ctx) -> bool:
+        """Organisateur autorisé ET Secret Santa activé ; répond sinon."""
+        if not self._is_admin(ctx):
+            await ctx.send(NOT_ORGANIZER)
+            return False
+        if not await asyncio.to_thread(self.store.is_enabled):
+            await ctx.send(f"⛔ Secret Santa désactivé. `{ctx.prefix}secret-santa on` pour le réactiver.")
+            return False
+        return True
+
     async def _private(self, ctx, content: str, **kwargs) -> bool:
         """Envoie en MP à l'auteur de la commande ; accusé de réception dans le salon."""
         try:
@@ -172,13 +181,13 @@ class SecretSanta(commands.Cog):
     @commands.group(
         name="secret-santa",
         invoke_without_command=True,
-        help="Secret Santa : test, draw, status, retry",
+        help="Secret Santa : test, draw, status, retry, info, on, off",
     )
     @commands.guild_only()
     async def secret_santa(self, ctx):
         p = ctx.prefix
         await ctx.send(
-            f"Sous-commandes : `{p}secret-santa test|draw|status|retry`. Détails : `{p}helps secret-santa`."
+            f"Sous-commandes : `{p}secret-santa test|draw|status|retry|info|on|off`. Détails : `{p}helps secret-santa`."
         )
 
     @secret_santa.command(
@@ -192,8 +201,7 @@ class SecretSanta(commands.Cog):
         },
     )
     async def test(self, ctx, user: discord.User = None):
-        if not self._is_admin(ctx):
-            await ctx.send(NOT_ORGANIZER)
+        if not await self._allowed(ctx):
             return
         target = user or ctx.author
         if target.bot:
@@ -219,8 +227,7 @@ class SecretSanta(commands.Cog):
         },
     )
     async def draw(self, ctx, message_url: str, emoji: str):
-        if not self._is_admin(ctx):
-            await ctx.send(NOT_ORGANIZER)
+        if not await self._allowed(ctx):
             return
         guild = ctx.guild
         year = datetime.now().year
@@ -258,7 +265,17 @@ class SecretSanta(commands.Cog):
             "Le tirage est **définitif** et les MP partent immédiatement. "
             "Personne, toi compris, ne verra les attributions. Confirmer ?"
         )
-        await self._private(ctx, text, view=ConfirmDrawView(self, ctx.author.id, guild.id, participants))
+        error = (
+            f"❌ Erreur inattendue pendant le tirage. Vérifie `{p}secret-santa status` : "
+            f"si le tirage est enregistré, utilise `{p}secret-santa retry` (jamais de nouveau tirage)."
+        )
+        view = ConfirmView(
+            ctx.author.id,
+            lambda: self.execute_draw(guild.id, ctx.author.id, participants),
+            "Lancer le tirage",
+            error,
+        )
+        await self._private(ctx, text, view=view)
 
     async def _fetch_message(self, guild: discord.Guild, channel_id: int, message_id: int):
         channel = guild.get_channel_or_thread(channel_id)
@@ -291,8 +308,7 @@ class SecretSanta(commands.Cog):
         extras={"examples": ["secret-santa status"], "permission": "Organisateur autorisé"},
     )
     async def status(self, ctx):
-        if not self._is_admin(ctx):
-            await ctx.send(NOT_ORGANIZER)
+        if not await self._allowed(ctx):
             return
         p = ctx.prefix
         latest = await asyncio.to_thread(self.store.latest_draw, ctx.guild.id)
@@ -317,8 +333,7 @@ class SecretSanta(commands.Cog):
         extras={"examples": ["secret-santa retry"], "permission": "Organisateur du tirage uniquement"},
     )
     async def retry(self, ctx):
-        if not self._is_admin(ctx):
-            await ctx.send(NOT_ORGANIZER)
+        if not await self._allowed(ctx):
             return
         guild_id = ctx.guild.id
         latest = await asyncio.to_thread(self.store.latest_draw, guild_id)
@@ -336,6 +351,74 @@ class SecretSanta(commands.Cog):
                 return
             report = await deliver_pending(self.store, self.bot.fetch_user, guild_id, year)
         await self._private(ctx, delivery_summary(report, len(waiting), ctx.prefix))
+
+    @secret_santa.command(
+        name="info",
+        help="Envoie à tous les participants le budget, la date de révélation et le vocal (confirmation requise)",
+        usage="<budget>",
+        extras={
+            "params": "budget (requis) : texte libre repris tel quel dans le message",
+            "examples": ["secret-santa info 20€ maximum"],
+            "permission": "Organisateur autorisé ; un tirage doit avoir eu lieu",
+        },
+    )
+    async def info(self, ctx, *, budget: str):
+        if not await self._allowed(ctx):
+            return
+        budget = budget.strip()
+        if len(budget) > 100:
+            await ctx.send("❌ Budget trop long (100 caractères max).")
+            return
+        guild_id = ctx.guild.id
+        latest = await asyncio.to_thread(self.store.latest_draw, guild_id)
+        if latest is None:
+            await ctx.send("Aucun tirage : lance d'abord le tirage.")
+            return
+        year = latest[0]
+        pending = await asyncio.to_thread(self.store.info_pending, guild_id, year)
+        if not pending:
+            await ctx.send("✅ Tous les participants ont déjà reçu ce message.")
+            return
+
+        async def send_all() -> str:
+            async with self._lock(guild_id):
+                report = await deliver_info(self.store, self.bot.fetch_user, guild_id, year, budget)
+            if not report.failed:
+                return f"✅ Message envoyé à **{report.sent}** participant(s)."
+            return (
+                f"📬 **{report.sent}** envoyé(s).\n"
+                f"⚠️ **{len(report.failed)}** MP en échec — relance `{ctx.prefix}secret-santa info {budget}` "
+                "(seuls ceux qui ne l'ont pas reçu sont recontactés) :\n"
+                + "\n".join(f"• <@{g}> ({n}) : {r.value}" for g, n, r in report.failed)
+            )
+
+        view = ConfirmView(ctx.author.id, send_all, f"Envoyer à {len(pending)} participant(s)",
+                           "❌ Erreur inattendue pendant l'envoi. Relance la commande : personne ne reçoit le message deux fois.")
+        await self._private(ctx, f"Aperçu du message envoyé à **{len(pending)}** participant(s) :\n\n{info_text(year, budget)}", view=view)
+
+    @secret_santa.command(
+        name="off",
+        help="Désactive toutes les commandes Secret Santa (réversible avec `on`)",
+        extras={"examples": ["secret-santa off"], "permission": "Organisateur autorisé"},
+    )
+    async def off(self, ctx):
+        if not self._is_admin(ctx):
+            await ctx.send(NOT_ORGANIZER)
+            return
+        await asyncio.to_thread(self.store.set_enabled, False)
+        await ctx.send(f"🔒 Secret Santa désactivé. `{ctx.prefix}secret-santa on` pour le réactiver.")
+
+    @secret_santa.command(
+        name="on",
+        help="Réactive les commandes Secret Santa",
+        extras={"examples": ["secret-santa on"], "permission": "Organisateur autorisé"},
+    )
+    async def on(self, ctx):
+        if not self._is_admin(ctx):
+            await ctx.send(NOT_ORGANIZER)
+            return
+        await asyncio.to_thread(self.store.set_enabled, True)
+        await ctx.send("🔓 Secret Santa réactivé.")
 
     async def cog_command_error(self, ctx, error):
         if isinstance(error, commands.MissingRequiredArgument):

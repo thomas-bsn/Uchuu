@@ -627,13 +627,132 @@ async def test_test_command_is_restricted(cog):
 
 
 # =========================
+# $$secret-santa info (budget, dates) et on / off
+# =========================
+
+def infos_received(users):
+    return {u.id: [dm for dm in u.dms if "Budget" in dm] for u in users}
+
+
+async def run_info(cog, users, budget="20€ maximum", user=None, confirm=True):
+    ctx = FakeCtx(FakeGuild(users), user or users[0])
+    await cog.info.callback(cog, ctx, budget=budget)
+    if confirm and ctx.views:
+        await ctx.views[0].confirm.callback(FakeInteraction(ctx.guild, users[0]))
+    return ctx
+
+
+async def test_info_previews_then_sends_to_every_participant_once(cog, bot):
+    users = make_users(5)
+    await full_draw(cog, bot, users)
+
+    preview = await run_info(cog, users, confirm=False)
+
+    (text,) = preview.texts_in("dm")  # l'aperçu part en MP à l'organisateur
+    for expected in ("20€ maximum", "nuit du 24 au 25 décembre", "en main propre sur place ou par la poste", "dimanche 20 décembre"):
+        assert expected in text
+    assert not any(infos_received(users).values())  # rien n'est parti avant confirmation
+
+    await run_info(cog, users)
+
+    assert all(len(v) == 1 for v in infos_received(users).values())
+    again = await run_info(cog, users)
+    assert "déjà reçu" in again.texts[-1]
+    assert all(len(v) == 1 for v in infos_received(users).values())  # jamais deux fois
+
+
+async def test_info_retry_only_contacts_participants_who_failed(cog, bot):
+    users = make_users(4)
+    await full_draw(cog, bot, users)
+    users[2].failure = discord.Forbidden
+    await run_info(cog, users)
+    users[2].failure = None
+    first = {u.id: len(v) for u, v in zip(users, infos_received(users).values())}
+
+    await run_info(cog, users)
+
+    after = infos_received(users)
+    assert [len(after[u.id]) for u in users] == [1, 1, 1, 1]
+    assert first[users[2].id] == 0 and first[users[0].id] == 1
+
+
+async def test_info_never_reveals_or_changes_assignments(cog, bot):
+    users = make_users(4)
+    await full_draw(cog, bot, users)
+    gifts = received(users)
+
+    await run_info(cog, users)
+
+    assert received(users) == gifts
+    assert all("pour offrir un cadeau" not in dm for u in users for dm in infos_received(users)[u.id])
+    assert cog.store.progress(GUILD_ID, YEAR) == (4, [])
+
+
+async def test_info_needs_a_draw_and_authorization(cog, bot):
+    users = make_users(3)
+    no_draw = await run_info(cog, users)
+    await full_draw(cog, bot, users)
+    stranger = await run_info(cog, users, user=users[1])  # autorisé : ok
+    denied = FakeCtx(FakeGuild(users), users[0], authorized=False)
+    await cog.info.callback(cog, denied, budget="10€")
+
+    assert "Aucun tirage" in no_draw.texts[-1]
+    assert stranger.views
+    assert "pas autorisé" in denied.texts[-1]
+
+
+async def test_off_blocks_every_command_and_on_restores_them(cog, bot):
+    users = make_users(3)
+    await full_draw(cog, bot, users)
+    off = FakeCtx(FakeGuild(users), users[0])
+    await cog.off.callback(cog, off)
+
+    blocked = []
+    for command, args in ((cog.test, (None,)), (cog.status, ()), (cog.retry, ())):
+        ctx = FakeCtx(FakeGuild(users), users[0])
+        await command.callback(cog, ctx, *args)
+        blocked.append(ctx)
+    draw_ctx = FakeCtx(*(setup_server(bot, users)[0], users[0]))
+    await cog.draw.callback(cog, draw_ctx, "https://discord.com/channels/1000/2000/3000", "🎅")
+    info_ctx = FakeCtx(FakeGuild(users), users[0])
+    await cog.info.callback(cog, info_ctx, budget="20€")
+
+    assert "désactivé" in off.texts[-1]
+    assert all("désactivé" in ctx.texts[-1] for ctx in [*blocked, draw_ctx, info_ctx])
+    assert not any(ctx.views or ctx.texts_in("dm") for ctx in [*blocked, draw_ctx, info_ctx])
+
+    on = FakeCtx(FakeGuild(users), users[0])
+    await cog.on.callback(cog, on)
+    status = FakeCtx(FakeGuild(users), users[0])
+    await cog.status.callback(cog, status)
+
+    assert "réactivé" in on.texts[-1] and "3/3" in status.texts_in("dm")[-1]
+
+
+async def test_off_and_on_are_restricted(cog):
+    for command in (cog.off, cog.on):
+        ctx = FakeCtx(FakeGuild([]), FakeUser(1), authorized=False)
+        await command.callback(cog, ctx)
+        assert "pas autorisé" in ctx.texts[-1]
+    assert cog.store.is_enabled()
+
+
+def test_disabled_state_survives_restart(shameless_db_path):
+    store = SecretSantaStore(str(shameless_db_path))
+    assert store.is_enabled()  # activé par défaut
+    store.set_enabled(False)
+
+    assert not SecretSantaStore(str(shameless_db_path)).is_enabled()
+
+
+# =========================
 # ENREGISTREMENT ET help
 # =========================
 
 def test_commands_registered_on_the_bot_prefix_group(bot):
     group = bot.get_command("secret-santa")
 
-    assert {c.name for c in group.commands} == {"test", "draw", "status", "retry"}
+    assert {c.name for c in group.commands} == {"test", "draw", "status", "retry", "info", "on", "off"}
     assert not bot.tree.get_commands()  # plus aucune slash command
     assert list(bot.get_command("secret-santa draw").clean_params) == ["message_url", "emoji"]
     assert list(bot.get_command("secret-santa test").clean_params) == ["user"]

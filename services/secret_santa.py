@@ -52,6 +52,17 @@ def dm_text(year: int, giver_name: str, recipient_name: str) -> str:
     )
 
 
+def info_text(year: int, budget: str) -> str:
+    return (
+        f"🎄 **SECRET SANTA {year}** 🎁\n\n"
+        "Quelques infos pour ton cadeau :\n\n"
+        f"💰 **Budget** : {budget}\n\n"
+        "📅 **Révélation** : dans la nuit du 24 au 25 décembre.\n\n"
+        "📦 **Livraison** : tu fais comme tu veux, en main propre sur place ou par la poste.\n\n"
+        "🎙️ **Vocal** : rendez-vous dimanche 20 décembre ; si tu ne peux pas être là, pas de souci."
+    )
+
+
 # =========================
 # PARTICIPANTS
 # =========================
@@ -155,6 +166,21 @@ class SecretSantaStore(SqliteStore):
             PRIMARY KEY (guild_id, year, giver_id)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS secret_santa_infos (  -- 2e message (budget, date...) déjà reçu
+            guild_id INTEGER NOT NULL,
+            year     INTEGER NOT NULL,
+            giver_id INTEGER NOT NULL,
+            sent_at  REAL NOT NULL,
+            PRIMARY KEY (guild_id, year, giver_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS secret_santa_settings (  -- ex. enabled = 0|1
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """,
     )
 
     def create_schema(self) -> None:
@@ -233,6 +259,39 @@ class SecretSantaStore(SqliteStore):
                 (time.time(), guild_id, year, giver_id),
             )
 
+    def is_enabled(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute("SELECT value FROM secret_santa_settings WHERE key = 'enabled'").fetchone()
+        return row is None or row[0] == "1"
+
+    def set_enabled(self, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO secret_santa_settings (key, value) VALUES ('enabled', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("1" if enabled else "0",),
+            )
+
+    def info_pending(self, guild_id: int, year: int) -> list[tuple[int, str]]:
+        """(giver_id, giver_name) des participants qui n'ont pas encore reçu le 2e message.
+        Ne lit que les donneurs, jamais un destinataire."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT a.giver_id, a.giver_name FROM secret_santa_assignments a"
+                " WHERE a.guild_id = ? AND a.year = ? AND NOT EXISTS ("
+                "   SELECT 1 FROM secret_santa_infos i"
+                "   WHERE i.guild_id = a.guild_id AND i.year = a.year AND i.giver_id = a.giver_id)"
+                " ORDER BY a.giver_id",
+                (guild_id, year),
+            ).fetchall()
+
+    def mark_info_sent(self, guild_id: int, year: int, giver_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO secret_santa_infos (guild_id, year, giver_id, sent_at) VALUES (?, ?, ?, ?)",
+                (guild_id, year, giver_id, time.time()),
+            )
+
     def progress(self, guild_id: int, year: int) -> tuple[int, list[tuple[int, str]]]:
         """(nombre de MP envoyés, [(giver_id, giver_name)] des MP en attente). Aucune attribution."""
         with self._conn() as conn:
@@ -302,4 +361,32 @@ async def deliver_pending(store: SecretSantaStore, resolve_user, guild_id: int, 
         else:
             failed.append((giver_id, giver_name, reason))
     logger.info("secret santa : %s MP envoyés, %s en échec (serveur %s)", sent, len(failed), guild_id)
+    return DeliveryReport(sent, failed)
+
+
+async def deliver_info(store: SecretSantaStore, resolve_user, guild_id: int, year: int, budget: str) -> DeliveryReport:
+    """Envoie le 2e message (budget, dates) aux participants qui ne l'ont pas encore reçu.
+
+    Réexécutable : un participant déjà servi n'est jamais recontacté. Ne touche pas aux attributions."""
+    pending = await asyncio.to_thread(store.info_pending, guild_id, year)
+    sent = 0
+    failed: list[tuple[int, str, FailureReason]] = []
+    for index, (giver_id, giver_name) in enumerate(pending):
+        if index:
+            await asyncio.sleep(SEND_DELAY_SECONDS)
+        try:
+            user = await resolve_user(giver_id)
+        except discord.NotFound:
+            failed.append((giver_id, giver_name, FailureReason.NOT_FOUND))
+            continue
+        except discord.HTTPException:
+            failed.append((giver_id, giver_name, FailureReason.DISCORD_ERROR))
+            continue
+        reason = await send_dm(user, info_text(year, budget))
+        if reason is None:
+            await asyncio.to_thread(store.mark_info_sent, guild_id, year, giver_id)
+            sent += 1
+        else:
+            failed.append((giver_id, giver_name, reason))
+    logger.info("secret santa : message d'infos, %s envoyés, %s en échec (serveur %s)", sent, len(failed), guild_id)
     return DeliveryReport(sent, failed)
