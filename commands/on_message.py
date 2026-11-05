@@ -101,6 +101,19 @@ class MessageReaction(commands.Cog):
         else:
             await ctx.send('La commande nécessite un argument "on" ou "off".')
 
+    @commands.command(name='targets', help='Affiche la liste des targets actives.')
+    async def targets(self, ctx):
+        user_id_to_check = load_user_id_to_check(self.target_file_path)
+        if not user_id_to_check:
+            await ctx.send('Aucune target active dans include/target.txt.')
+            return
+
+        lines = [
+            f'{name} : <@{user_id}>'
+            for name, user_id in user_id_to_check.items()
+        ]
+        await ctx.send("Targets actives :\n" + "\n".join(lines))
+
 
 
 
